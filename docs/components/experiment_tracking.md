@@ -16,9 +16,9 @@ A critical aspect of the tracking system is its strict state machine.
 
 ## Tracking Workflow Details
 1. A **model repository** can be created to house artifacts.
-2. An **experiment** is created. The user specifies which metrics to log and how they should be aggregated on the dashboard.
+2. An **experiment** is created. The user specifies which metrics to log.
 3. A **run** is initiated and transitions to `RUNNING`.
 4. During the training loop, the metrics defined in the experiment are logged via the SDK. *(Note: If a metric defined in the experiment is not logged by the user's script, it is considered the user's responsibility).*
-5. If a model repository was associated with the run, the model weights or serialized files (`.pkl` or `.keras`) are uploaded.
+5. If a model artifact was uploaded during the run, it is placed into the specified model repository.
 6. A successful completion transitions the run to `COMPLETED`.
 7. **Dashboard Integration:** The run is visually linked to the uploaded model. Future runs linked to the same repository will generate new model versions.

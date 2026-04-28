@@ -1,6 +1,6 @@
 # Feature Registry
 
-The Feature Registry module operates as a primitive data repository centered around versioned "datasets". It supports importing various data structures (Pandas DataFrames, Polars DataFrames, Numpy arrays, TensorFlow datasets, CSV, Parquet, and Avro files) via the SDK. All raw data is stored in MinIO.
+The Feature Registry module operates as a primitive data repository centered around versioned "datasets". It supports importing Pandas DataFrames, Numpy arrays, CSV and Parquet files via the SDK. All raw data is stored in MinIO.
 
 ## The OOM (Out-Of-Memory) Bottleneck
 A critical architectural decision was made to prevent the Control Plane API from directly handling dataset payloads.

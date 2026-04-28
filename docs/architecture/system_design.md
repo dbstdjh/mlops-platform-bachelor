@@ -22,7 +22,7 @@ Initially, the system considered using a sidecar pattern (injecting a Go API Gat
 ## Secondary Components
 
 ### Deployment Service (Python)
-An event-driven service responsible for actualizing models. It receives tasks from the Control Plane, pulls the specified image (default prebuilt images for `.pkl`/`.keras` or custom images), configures it, and deploys it to the cluster. It updates deployment statuses via polling.
+An event-driven service responsible for actualizing models. It is triggered via PostgreSQL's `LISTEN/NOTIFY` mechanism when the Control Plane inserts a new deployment task. Upon receiving the signal, it claims the task, pulls the specified image (default prebuilt images for `.pkl`/`.keras` or custom images), configures it, and deploys it to the cluster. After deployment, it polls the Kubernetes API for pod health status and updates the deployment record accordingly.
 
 ### Python SDK
 The primary interface for data scientists. It interacts with the Control Plane for all platform management tasks, dataset handling, and model deployments.

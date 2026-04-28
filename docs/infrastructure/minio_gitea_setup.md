@@ -1,44 +1,66 @@
-# MinIO and Gitea Infrastructure
+# Storage and Registry Infrastructure (MinIO & Gitea)
 
-The system relies on Docker Compose to orchestrate local instances of PostgreSQL, MinIO, and Gitea. Gitea is configured to use MinIO as its unified storage backend.
+The platform relies on Docker Compose to orchestrate local instances of MinIO and Gitea. Together with PostgreSQL, these services form the foundational storage and artifact registry layer. 
 
-## Architecture
-- **PostgreSQL:** Backs both the Control Plane and Gitea.
-- **MinIO:** Handles direct S3 storage for datasets and acts as the backend for Gitea's artifacts.
-- **Gitea:** Manages git repositories and Docker container registries.
+Rather than just standing up isolated services, MinIO and Gitea are deeply integrated to support specific MLOps workflows, such as event-driven dataset ingestion and unified storage management.
 
-## MinIO Webhook Configuration
-To support the Feature Registry's event-driven dataset upload flow, MinIO is configured to trigger webhooks. This is done purely via environment variables and an initialization container.
+## 1. MinIO: Event-Driven Feature Registry Backend
 
-### 1. Defining the Webhook (Control Plane Target)
-Inside the `minio` service environment variables, a target named `fastapi` is defined:
+MinIO acts as the S3-compatible object storage for the platform. It hosts two primary buckets:
+- **`datasets`:** The destination for datasets uploaded via the Feature Registry. Configured with a webhook to notify the Control Plane on upload completion.
+- **`models`:** The destination for model weights (`.pkl`, `.keras` files) uploaded during experiment tracking. No webhook is needed — model uploads are confirmed synchronously via the SDK.
+
+### The Upload Workflow
+To prevent the FastAPI Control Plane from crashing due to Out-Of-Memory (OOM) errors when users upload large files (e.g., a 2GB Parquet file), the infrastructure uses a direct-to-storage flow:
+
+1. **Ticket Generation:** The SDK asks the Control Plane for permission to upload. The Control Plane creates a `PENDING` record in PostgreSQL and returns a Pre-signed URL.
+2. **Direct Streaming:** The SDK uses the Pre-signed URL to upload the file directly to MinIO, completely bypassing the Python backend.
+3. **Webhook Notification:** MinIO is configured with a webhook targeting the Control Plane. The moment the upload finishes, MinIO sends a standard S3 Event Notification to the FastAPI webhook endpoint.
+4. **State Resolution:** The Control Plane receives the webhook and marks the dataset as `READY` in PostgreSQL.
+
+### Webhook Configuration
+This event-driven flow is configured entirely via environment variables and an initialization container (`minio-init`), requiring no manual setup.
+
+Inside the `minio` service, the webhook target is defined:
 ```yaml
 environment:
   - MINIO_NOTIFY_WEBHOOK_ENABLE_fastapi=on
   - MINIO_NOTIFY_WEBHOOK_ENDPOINT_fastapi=http://api:8000/api/v1/datasets/webhook
 ```
 
-### 2. Binding the Event (`minio-init`)
-An initialization container (`minio/mc`) runs a startup script to create buckets and attach the webhook:
+The `minio-init` container then creates the bucket and binds the `put` (upload) event to the webhook:
 ```bash
 # Setup Alias
 /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
 
-# Create the Bucket
+# Create the Buckets
 /usr/bin/mc mb myminio/datasets --ignore-existing;
+/usr/bin/mc mb myminio/models --ignore-existing;
 
-# Attach the Webhook Event to 'put' (uploads)
+# Attach the Webhook Event to 'put' (uploads) on the datasets bucket only
 /usr/bin/mc event add myminio/datasets arn:minio:sqs::fastapi:webhook --event put;
 ```
 
-## Gitea Unified Storage
-Gitea is configured via environment variables to route all of its storage (LFS, avatars, attachments, packages) directly into MinIO.
+## 2. Gitea: Artifact Registry and Unified Storage
+
+Gitea serves as the platform's Artifact Registry. When users deploy custom models, Gitea acts as the Docker container registry that the Deployment Service pulls from.
+
+### The Unified Storage Workflow
+By default, Gitea stores its data (LFS files, avatars, attachments, and Docker packages) on the local filesystem. To simplify infrastructure management and disaster recovery, Gitea is configured to route **all** of its storage directly into MinIO.
+
+This means the entire state of the platform (excluding the PostgreSQL database) lives in a single MinIO volume.
+
+### Gitea MinIO Configuration
+Gitea is configured via environment variables to utilize the internal MinIO network endpoint:
 
 ```yaml
 environment:
+  # Unified Storage Configuration (Routes EVERYTHING to MinIO)
   - GITEA__storage__STORAGE_TYPE=minio
   - GITEA__storage__MINIO_ENDPOINT=minio:9000
   - GITEA__storage__MINIO_ACCESS_KEY_ID=minioadmin
   - GITEA__storage__MINIO_SECRET_ACCESS_KEY=minioadmin
   - GITEA__storage__MINIO_BUCKET=gitea-bucket
+  - GITEA__storage__MINIO_LOCATION=us-east-1
+  - GITEA__storage__MINIO_USE_SSL=false
 ```

@@ -5,10 +5,10 @@ The deployment module handles the lifecycle of transitioning registered models i
 ## Deployment Architecture
 Deployments are initiated entirely through the Python SDK; the web dashboard is strictly read-only. 
 
-- **Triggers:** A deployment request triggers a message queue.
-- **Execution:** A separate Python Deployment Service consumes the task.
+- **Triggers:** A deployment request inserts a task into PostgreSQL. The Deployment Service is woken up instantly via PostgreSQL's `LISTEN/NOTIFY` mechanism.
+- **Execution:** The Deployment Service claims the task and provisions the model container.
 - **Environments:** Models can be deployed using prebuilt images (for `.pickle` or `.keras` files) or custom images defined in the Artifact Registry.
-- **Monitoring:** The status of the deployment (and deletion) is monitored by the deployment service via polling. *(Note: While polling works for the MVP, it is flagged as an area for future architectural improvement).*
+- **Health Monitoring:** After deployment, the Deployment Service polls the Kubernetes API for pod health status and updates the deployment record. *(Note: While K8s health polling works for the PoC, it is flagged as an area for future architectural improvement).*
 
 ## Schema Validation
 When deploying a model, an input and output schema must be defined. The SDK utilizes **Pydantic** to define these schemas.
