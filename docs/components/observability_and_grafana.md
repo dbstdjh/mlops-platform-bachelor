@@ -13,7 +13,7 @@ For simple time-series metrics (e.g., loss curves during training), the system a
 - The React app utilizes a lightweight library like **Recharts**.
 - The backend serves simple JSON arrays (`[{step: 1, val: 0.9}]`), allowing the frontend to render interactive line charts in very few lines of code.
 
-When complex plotting is required, the frontend remains completely dumb. If the UI needs a dropdown of features to plot, it asks the backend (`GET /models/{id}/plot-features`). FastAPI parses the model's JSON schema, extracts purely numeric keys, and returns a simple list for the frontend to render.
+When complex plotting is required, the frontend remains completely dumb. If the UI needs a dropdown of features to plot, it asks the backend (`GET /repositories/{repository_slug}/models/{version}:plot_features`). FastAPI parses the model's JSON schema, extracts purely numeric keys, and returns a simple list for the frontend to render.
 
 ## Dynamic Dashboard Generation (Grafana API)
 For complex, multi-metric observability (like deployment drift metrics), the FastAPI backend acts as an orchestrator, bridging the platform's database with Grafana's Provisioning API.

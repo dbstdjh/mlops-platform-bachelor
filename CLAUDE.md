@@ -3,6 +3,29 @@
 > **Project Context: Bachelor's Thesis**
 > This is a focused, high-quality Proof-of-Concept MLOps platform. Do not introduce enterprise-scale bloat, unnecessary microservices, or over-engineered abstractions. Write clean, robust, and intelligent code. Follow the established architectural patterns strictly.
 
+## Development Phases
+
+The project is split into two phases. **Always check which phase is currently active before starting work.**
+
+### Phase 1: Pre-Kube (CURRENT)
+
+All work runs on a single Docker Compose stack. **Do NOT implement anything related to:**
+- Model Serving & Deployment module (control plane)
+- Deployment Service (worker)
+- Edge API Gateway (Go)
+- Kubernetes / Minikube
+- Custom model container images
+
+**In scope:**
+- Docker Compose infrastructure (PostgreSQL, MinIO, Gitea, Grafana)
+- Control Plane API: Users & IAM, Experiment Tracking, Model Versioning & Registry, Feature Registry, Observability, Artifact Registry
+- Python SDK
+- React Dashboard
+
+### Phase 2: Post-Kube (FUTURE)
+
+Introduces Minikube, the Deployment Service, Edge Gateway, model containers, and the deployment module on the Control Plane. Do not begin this phase until Phase 1 is fully implemented and tested.
+
 ## Documentation
 
 **Read the docs before writing any code.** The `docs/` directory is the single source of truth for all architectural decisions. The documentation is structured as follows:
@@ -85,12 +108,22 @@ This is a monorepo. Each deployable service is an independent package:
 4. **Strict state machines.** Runs follow `RUNNING → COMPLETED | FAILED`. Deployments follow `PENDING → DEPLOYING → ACTIVE | FAILED`. The SDK wraps training loops in try/catch to prevent zombie runs.
 5. **Edge authentication.** JWT validation for model inference happens at the Go Gateway, not in the model containers.
 6. **Resources have metadata.** Everything is treated as a resource with key-value labels (the `resource` table). Use this for filtering and arbitrary metadata storage.
+7. **`data-model.sql` is the schema source of truth.** Any change to the database schema (adding tables, columns, constraints, triggers) **must** be reflected in `data-model.sql` first, then propagated to ORM models and migrations. The SQL file and the ORM models must always be in sync.
+
+## Coding Standards & API Design
+
+1. **Strict Dependency Injection (DI):** External clients (like MinIO, DB sessions, external APIs) must NEVER be initialized inside constructors or business logic functions. They must be injected from the outside (e.g. via FastAPI's `Depends` in the presentation layer, passing them to application services).
+2. **Clean Code & Imports:** Standardize your code. Group imports properly (stdlib, third-party, local), sort them, and do NOT place imports inside functions. While you shouldn't get stuck in a formatter loop, always try to write clean, properly-styled code from the start.
+3. **API Route Naming:** Follow this strict RESTful nested resource pattern with custom verbs when necessary:
+   `/parent_resource/{parent_resource_id}/child_resource/{child_resource_id}:custom_verb`
+   *(e.g., `/datasets/upload` should be `/datasets:upload` or `/models/{model_id}:upload`)*
+4. **No Exposed Internal IDs:** Database primary keys and foreign keys are internal only. Public APIs must not expose UUID primary keys. User-facing routes and responses must use immutable, server-generated slugs plus business keys such as version numbers. Slugs should be derived from names, unique per user, and treated as stable API identifiers.
 
 ## Testing & Verification
 
 ### Requirements
 
-After implementing any feature, modifying existing code, or fixing a bug, you **must** write and execute tests. Testing is not optional.
+After implementing any feature, modifying existing code, or fixing a bug, you **must** write and execute tests. Testing is not optional. **Every function must be thoroughly tested.** This includes normal happy-path cases, boundary/edge cases, and failure modes. Test undercoverage is unacceptable.
 
 ### Test Levels
 

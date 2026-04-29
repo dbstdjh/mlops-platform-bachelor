@@ -2,6 +2,14 @@
 
 The Feature Registry module operates as a primitive data repository centered around versioned "datasets". It supports importing Pandas DataFrames, Numpy arrays, CSV and Parquet files via the SDK. All raw data is stored in MinIO.
 
+## Public Identity Model
+Datasets must not expose internal database UUIDs through the public API.
+
+- Every logical dataset receives an immutable, server-generated `slug`.
+- The slug is derived from the submitted dataset name, made unique per user, and then reused for every future version of that dataset.
+- The external dataset identity is therefore `(current_user, dataset_slug, version)`.
+- Database primary keys remain internal implementation details used only for joins and foreign keys.
+
 ## The OOM (Out-Of-Memory) Bottleneck
 A critical architectural decision was made to prevent the Control Plane API from directly handling dataset payloads.
 
@@ -15,7 +23,7 @@ A critical architectural decision was made to prevent the Control Plane API from
 1. **Initiation:** The user has a DataFrame in their local environment and runs `mlops.upload_dataset()`.
 2. **Local Conversion:** The SDK silently converts the dataset to Parquet in-memory.
 3. **URL Request:** The SDK requests a pre-signed upload URL from FastAPI.
-4. **State Initialization:** FastAPI creates a `PENDING` dataset record in PostgreSQL and returns the pre-signed URL.
+4. **State Initialization:** FastAPI resolves or creates an immutable dataset slug, creates a `PENDING` dataset version in PostgreSQL, and returns the pre-signed URL.
 5. **Direct Upload:** The SDK streams the file directly to MinIO, completely bypassing the Python backend.
 6. **Webhook Confirmation:** MinIO fires a webhook to FastAPI confirming the upload, prompting FastAPI to update the dataset status to `READY`.
 
@@ -25,6 +33,16 @@ A critical architectural decision was made to prevent the Control Plane API from
 3. **The Ticket Generation:** FastAPI utilizes internal credentials to generate a temporary, cryptographically signed `GET` URL for the specific object path in MinIO.
 4. **The Handshake:** FastAPI returns only the URL to the SDK.
 5. **The Direct Ingestion:** The SDK passes the URL directly into its data processing library (e.g., `pd.read_parquet()`), pulling the bytes straight from MinIO into local RAM, bypassing the API.
+
+## API Shape
+The API should use slug-based dataset identity rather than UUIDs.
+
+- `POST /datasets:upload`
+- `POST /datasets:confirm_upload`
+- `GET /datasets`
+- `GET /datasets/{dataset_slug}/versions/{version}`
+- `GET /datasets/{dataset_slug}:download`
+- `GET /datasets/{dataset_slug}/versions/{version}:download`
 
 ## MinIO Webhook Architecture
 To achieve step 6 of the Push Workflow, MinIO is configured to trigger a webhook directly to the Control Plane API.
