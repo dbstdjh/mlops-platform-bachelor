@@ -76,6 +76,7 @@ async def test_list_api_keys_returns_safe_payload():
             return_value=[
                 {
                     "name": "sdk",
+                    "prefix": "abc123",
                     "is_revoked": False,
                     "created_at": "2026-01-01T00:00:00Z",
                 }
@@ -89,6 +90,7 @@ async def test_list_api_keys_returns_safe_payload():
 
     assert response.status_code == 200
     assert response.json()[0]["name"] == "sdk"
+    assert response.json()[0]["prefix"] == "abc123"
 
 
 @pytest.mark.asyncio
@@ -96,13 +98,14 @@ async def test_create_api_key_returns_plaintext_once():
     user = build_user()
     api_key_service = SimpleNamespace(
         issue_key=AsyncMock(
-            return_value={
-                "name": "sdk",
-                "is_revoked": False,
-                "created_at": "2026-01-01T00:00:00Z",
-                "api_key": "mlp_abc123_secret",
-            }
-        )
+                return_value={
+                    "name": "sdk",
+                    "prefix": "abc123",
+                    "is_revoked": False,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "api_key": "mlp_abc123_secret",
+                }
+            )
     )
     app = create_user_test_app(user, SimpleNamespace(), api_key_service)
 
@@ -111,6 +114,7 @@ async def test_create_api_key_returns_plaintext_once():
 
     assert response.status_code == 201
     assert response.json()["api_key"] == "mlp_abc123_secret"
+    assert response.json()["prefix"] == "abc123"
 
 
 @pytest.mark.asyncio

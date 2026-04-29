@@ -58,6 +58,7 @@ async def test_list_keys_maps_entities_to_safe_response_models():
 
     assert len(result) == 1
     assert result[0].name == "cli"
+    assert result[0].prefix == "abc123"
     assert result[0].is_revoked is False
     assert result[0].created_at == created_at
 

@@ -60,6 +60,7 @@ async def test_phase_one_registry_journey(client):
     model_response = await client.get(f"/api/v1/repositories/{repository_slug}/models/1.0")
     assert model_response.status_code == 200
     assert model_response.json()["status"] == "READY"
+    assert model_response.json()["file_type"] == "undefined"
 
     dataset_response = await client.post(
         "/api/v1/datasets:upload",

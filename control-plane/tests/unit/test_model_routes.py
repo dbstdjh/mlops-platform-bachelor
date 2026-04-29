@@ -41,6 +41,7 @@ def build_model_response(repository_slug: str, name: str, version: str = "1.0") 
         is_deleted=False,
         s3_uri=None,
         status="PENDING",
+        file_type="undefined",
         created_at="2026-01-01T00:00:00Z",
         labels={"framework": "pytorch"},
     )
@@ -192,10 +193,34 @@ async def test_get_model_upload_url_returns_service_payload():
     app = create_model_test_app(service)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/v1/repositories/catalog/models/2.0:upload")
+        response = await client.post(
+            "/api/v1/repositories/catalog/models/2.0:upload",
+            json={"file_name": "crappy-shit.pkl"},
+        )
 
     assert response.status_code == 200
     assert response.json()["version"] == "2.0"
+    service.get_upload_url.assert_awaited_once_with(
+        uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        "catalog",
+        "2.0",
+        file_name="crappy-shit.pkl",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_model_upload_url_returns_422_for_invalid_filename():
+    service = SimpleNamespace(get_upload_url=AsyncMock(side_effect=ValueError("file_name must contain a valid filename")))
+    app = create_model_test_app(service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/repositories/catalog/models/2.0:upload",
+            json={"file_name": ".."},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "file_name must contain a valid filename"
 
 
 @pytest.mark.asyncio

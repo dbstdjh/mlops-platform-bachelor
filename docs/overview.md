@@ -28,7 +28,7 @@ A monolithic backend built with a strict onion architecture (core, application, 
 The primary interface for data scientists to interact with the platform. It handles Control Plane API interactions, orchestrates direct-to-storage data uploads (bypassing the API to avoid OOM issues), wraps training loops to enforce strict state machine reporting, and initiates deployments.
 
 ### 3. Web App Dashboard (React + Tailwind CSS)
-A heavily read-optimized UI dedicated to observability. It provides a visual interface to explore experiments, datasets, and deployed models. It features embedded plotting capabilities for both run details and deployment metrics.
+A heavily read-optimized UI dedicated to observability. It provides a visual interface to explore experiments, datasets, and deployed models. It supports explicit run comparison on experiment pages and embedded Grafana-backed saved plots on run details.
 
 ### 4. Deployment Service (Python)
 An event-driven worker responsible for materializing models into the Kubernetes cluster. It is triggered via PostgreSQL's `LISTEN/NOTIFY` mechanism when the Control Plane inserts a deployment task. Upon receiving the signal, it claims the task, pulls the necessary Docker images or model files, and provisions the cluster resources. After deployment, it polls the Kubernetes API for pod health to confirm the endpoint is active.
@@ -48,8 +48,9 @@ The platform provides a strict lifecycle for tracking model training to ensure d
 3. A **Run** is started under the experiment.
 4. During training, the specified metrics are logged continuously.
 5. If a model artifact was uploaded during the run, it is placed into the specified model repository.
-6. The dashboard aggregates all metrics across runs for the experiment, allowing users to drill down into the history of metric evolution for individual runs.
-7. If a model was uploaded, it is visually linked to the specific run that generated it within the dashboard.
+6. The dashboard lets users choose which runs to compare for a selected metric, preventing unreadable charts when an experiment has many runs.
+7. Individual runs can persist up to four saved observability plots for repeated inspection.
+8. If a model was uploaded, it is visually linked to the specific run that generated it within the dashboard.
 
 ### 2. Feature Registry (Dataset) Workflow
 The platform is designed to handle large datasets seamlessly without overwhelming the central API.

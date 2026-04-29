@@ -24,6 +24,12 @@ CREATE TABLE "model_status" (
   PRIMARY KEY ("id")
 );
 
+CREATE TABLE "file_type" (
+  "id" UUID NOT NULL,
+  "name" VARCHAR NOT NULL UNIQUE,
+  PRIMARY KEY ("id")
+);
+
 CREATE TABLE "deployment_status" (
   "id" UUID NOT NULL,
   "name" VARCHAR NOT NULL UNIQUE,
@@ -214,6 +220,7 @@ CREATE TABLE "model" (
   "is_deleted" BOOLEAN NOT NULL DEFAULT FALSE,
   "s3_uri" VARCHAR,
   "status_id" UUID NOT NULL,
+  "file_type_id" UUID NOT NULL,
   "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   PRIMARY KEY ("id"),
   CONSTRAINT "FK_model_resource_id"
@@ -228,6 +235,9 @@ CREATE TABLE "model" (
   CONSTRAINT "FK_model_status_id"
     FOREIGN KEY ("status_id")
       REFERENCES "model_status"("id"),
+  CONSTRAINT "FK_model_file_type_id"
+    FOREIGN KEY ("file_type_id")
+      REFERENCES "file_type"("id"),
   CONSTRAINT "UQ_model_repo_version"
     UNIQUE ("repository_id", "version")
 );
@@ -298,8 +308,10 @@ CREATE TABLE "deployment_task" (
 CREATE TABLE "dashboard" (
   "id" UUID NOT NULL,
   "name" VARCHAR NOT NULL,
+  "kind" VARCHAR NOT NULL DEFAULT 'RUN_PLOT',
   "grafana_uid" VARCHAR UNIQUE,
   "is_system_locked" BOOLEAN NOT NULL DEFAULT FALSE,
+  "config_data" JSONB NOT NULL DEFAULT '{}',
   "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   PRIMARY KEY ("id")
 );
@@ -307,6 +319,7 @@ CREATE TABLE "dashboard" (
 CREATE TABLE "run_dashboard" (
   "id" UUID NOT NULL,
   "run_id" UUID NOT NULL,
+  "display_order" INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY ("id"),
   CONSTRAINT "FK_run_dashboard_id"
     FOREIGN KEY ("id")
@@ -341,6 +354,13 @@ CREATE TABLE "inference_log" (
     FOREIGN KEY ("deployment_id")
       REFERENCES "deployment"("id") ON DELETE CASCADE
 );
+
+-- ===================== Seed Data =============================
+
+INSERT INTO "file_type" ("id", "name") VALUES
+  ('11111111-1111-1111-1111-111111111111', 'pickle'),
+  ('22222222-2222-2222-2222-222222222222', 'undefined')
+ON CONFLICT ("name") DO NOTHING;
 
 -- ===================== Deployment Eventing ====================
 

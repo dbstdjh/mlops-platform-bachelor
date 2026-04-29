@@ -30,6 +30,7 @@ A critical aspect of the tracking system is its strict state machine.
 5. If a model artifact was uploaded during the run, it is placed into the specified model repository.
 6. A successful completion transitions the run to `COMPLETED`.
 7. **Dashboard Integration:** The run is visually linked to the uploaded model. Future runs linked to the same repository will generate new model versions.
+8. **Observability Integration:** Experiment pages provide explicit run-to-run comparison for a selected metric, while run pages can persist up to four saved Grafana-backed plots for repeated inspection.
 
 ## Model Artifact Lifecycle
 Model artifacts use a lightweight state machine to avoid claiming an artifact is downloadable before it actually exists in storage.

@@ -27,6 +27,7 @@ class ApiKeyCreate(BaseModel):
 
 class ApiKeyResponse(BaseModel):
     name: str
+    prefix: str
     is_revoked: bool
     created_at: datetime
 

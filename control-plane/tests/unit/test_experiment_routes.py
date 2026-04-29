@@ -17,6 +17,7 @@ from src.core.entities.experiment_tracking import (
     RunResponse,
     RunSummaryResponse,
 )
+from src.core.entities.dashboard import RunDashboardResponse
 from src.presentation.api.v1 import experiments
 from src.presentation.dependencies import get_current_user_id, get_experiment_tracking_service
 
@@ -184,3 +185,67 @@ async def test_get_metrics_returns_service_payload():
 
     assert response.status_code == 200
     assert response.json() == {"metrics": ["loss", "accuracy"]}
+
+
+@pytest.mark.asyncio
+async def test_run_dashboard_routes_delegate_to_service():
+    dashboard_id = uuid.uuid4()
+    service = SimpleNamespace(
+        list_run_dashboards=AsyncMock(
+            return_value=[
+                RunDashboardResponse(
+                    id=dashboard_id,
+                    title="Loss panel",
+                    plot_type="line",
+                    metrics=["loss"],
+                    display_order=0,
+                    iframe_url="http://grafana.local/d-solo/run-plot",
+                    created_at="2026-01-01T00:00:00Z",
+                )
+            ]
+        ),
+        create_run_dashboard=AsyncMock(
+            return_value=RunDashboardResponse(
+                id=dashboard_id,
+                title="Loss panel",
+                plot_type="line",
+                metrics=["loss"],
+                display_order=0,
+                iframe_url="http://grafana.local/d-solo/run-plot",
+                created_at="2026-01-01T00:00:00Z",
+            )
+        ),
+        update_run_dashboard=AsyncMock(
+            return_value=RunDashboardResponse(
+                id=dashboard_id,
+                title="Loss stat",
+                plot_type="stat",
+                metrics=["loss"],
+                display_order=0,
+                iframe_url="http://grafana.local/d-solo/run-plot",
+                created_at="2026-01-01T00:00:00Z",
+            )
+        ),
+        delete_run_dashboard=AsyncMock(return_value=None),
+    )
+    app = create_experiment_test_app(service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        list_response = await client.get("/api/v1/experiments/training/runs/2/dashboards")
+        create_response = await client.post(
+            "/api/v1/experiments/training/runs/2/dashboards",
+            json={"title": "Loss panel", "plot_type": "line", "metrics": ["loss"]},
+        )
+        update_response = await client.patch(
+            f"/api/v1/experiments/training/runs/2/dashboards/{dashboard_id}",
+            json={"title": "Loss stat", "plot_type": "stat", "metrics": ["loss"]},
+        )
+        delete_response = await client.delete(f"/api/v1/experiments/training/runs/2/dashboards/{dashboard_id}")
+
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["title"] == "Loss panel"
+    assert create_response.status_code == 201
+    assert create_response.json()["plot_type"] == "line"
+    assert update_response.status_code == 200
+    assert update_response.json()["title"] == "Loss stat"
+    assert delete_response.status_code == 204

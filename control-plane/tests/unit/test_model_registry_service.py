@@ -61,6 +61,7 @@ class FakeModelRepo:
     def __init__(self):
         self.models: dict[uuid.UUID, Model] = {}
         self.updated_s3_uris: list[tuple[uuid.UUID, str]] = []
+        self.updated_file_types: list[tuple[uuid.UUID, str]] = []
         self.mark_ready_calls: list[uuid.UUID] = []
 
     async def create(self, model: Model) -> Model:
@@ -84,6 +85,21 @@ class FakeModelRepo:
         self.models[model_id] = updated
         self.updated_s3_uris.append((model_id, s3_uri))
         return updated
+
+    async def update_file_type(self, model_id: uuid.UUID, file_type: str) -> Model | None:
+        model = self.models.get(model_id)
+        if model is None:
+            return None
+        updated = model.model_copy(update={"file_type": file_type})
+        self.models[model_id] = updated
+        self.updated_file_types.append((model_id, file_type))
+        return updated
+
+    async def get_by_s3_uri(self, s3_uri: str) -> Model | None:
+        for model in self.models.values():
+            if model.s3_uri == s3_uri:
+                return model
+        return None
 
     async def get_ready_by_version(self, repository_id: uuid.UUID, version: str) -> Model | None:
         for model in self.models.values():
@@ -324,8 +340,10 @@ async def test_create_model_persists_model_and_labels(model_dependencies):
     assert created_model.name == "detector"
     assert created_model.version == "2.1"
     assert created_model.status == "PENDING"
+    assert created_model.file_type == "undefined"
     assert created_model.resource_id in resource_repo.resources
     assert result.repository_slug == "cv-models"
+    assert result.file_type == "undefined"
     assert result.labels == model_resource_labels
 
 
@@ -435,6 +453,7 @@ async def test_get_model_returns_response_with_fallback_labels(model_dependencie
 
     assert result is not None
     assert result.repository_slug == "recommenders"
+    assert result.file_type == "undefined"
     assert result.labels == {}
     assert result.run == RunRef(experiment_slug="training", run_number=7)
 
@@ -501,15 +520,17 @@ async def test_get_upload_url_updates_s3_uri_and_returns_signed_url(model_depend
     await model_repo_repo.create(repo)
     await model_repo.create(model)
 
-    result = await service.get_upload_url(owner_id, "fraud", "3.4")
+    result = await service.get_upload_url(owner_id, "fraud", "3.4", file_name="crappy-shit.pkl")
 
-    expected_object_name = f"{owner_id}/fraud/fraud-detector/v3.4"
+    expected_object_name = f"{owner_id}/fraud/fraud-detector/crappy-shit.pkl"
     assert result is not None
     assert result.repository_slug == "fraud"
     assert result.version == "3.4"
     assert result.upload_url == f"https://upload.test/{MODELS_BUCKET}/{expected_object_name}"
     assert model_repo.models[model.id].s3_uri == f"s3://{MODELS_BUCKET}/{expected_object_name}"
+    assert model_repo.models[model.id].file_type == "pickle"
     assert storage.upload_calls == [(MODELS_BUCKET, expected_object_name, 1)]
+    assert model_repo.updated_file_types == [(model.id, "pickle")]
     assert model_repo.models[model.id].status == "PENDING"
 
 
@@ -556,7 +577,7 @@ async def test_confirm_upload_raises_when_object_missing_in_storage(model_depend
         repository_id=repo.id,
         name="fraud-detector",
         version="3.4",
-        s3_uri=f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/v3.4",
+        s3_uri=f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/crappy-shit.pkl",
     )
     await resource_repo.create(repo_resource)
     await resource_repo.create(model_resource)
@@ -566,7 +587,7 @@ async def test_confirm_upload_raises_when_object_missing_in_storage(model_depend
     with pytest.raises(ValueError, match="not found in storage"):
         await service.confirm_upload(owner_id, "fraud", "3.4")
 
-    assert storage.object_exists_calls == [(MODELS_BUCKET, f"{owner_id}/fraud/fraud-detector/v3.4")]
+    assert storage.object_exists_calls == [(MODELS_BUCKET, f"{owner_id}/fraud/fraud-detector/crappy-shit.pkl")]
 
 
 @pytest.mark.asyncio
@@ -576,7 +597,7 @@ async def test_confirm_upload_marks_model_ready_when_object_exists(model_depende
     repo_resource = Resource()
     model_resource = Resource()
     repo = ModelRepository(user_id=owner_id, resource_id=repo_resource.id, name="fraud", slug="fraud")
-    object_name = f"{owner_id}/fraud/fraud-detector/v3.4"
+    object_name = f"{owner_id}/fraud/fraud-detector/crappy-shit.pkl"
     model = Model(
         resource_id=model_resource.id,
         repository_id=repo.id,
@@ -611,13 +632,13 @@ async def test_confirm_upload_from_object_key_returns_false_for_invalid_key_shap
 async def test_confirm_upload_from_object_key_returns_false_for_invalid_user_id(model_dependencies):
     service, _, _, _, _, _, _ = model_dependencies
 
-    result = await service.confirm_upload_from_object_key("not-a-uuid/repo/model/v1.0")
+    result = await service.confirm_upload_from_object_key("not-a-uuid/repo/model/crappy-shit.pkl")
 
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_confirm_upload_from_object_key_returns_false_when_model_name_mismatches(model_dependencies):
+async def test_confirm_upload_from_object_key_returns_false_when_no_model_matches_object_key(model_dependencies):
     service, model_repo_repo, model_repo, resource_repo, _, _, _ = model_dependencies
     owner_id = uuid.uuid4()
     repo_resource = Resource()
@@ -628,13 +649,14 @@ async def test_confirm_upload_from_object_key_returns_false_when_model_name_mism
         repository_id=repo.id,
         name="fraud-detector",
         version="3.4",
+        s3_uri=f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/crappy-shit.pkl",
     )
     await resource_repo.create(repo_resource)
     await resource_repo.create(model_resource)
     await model_repo_repo.create(repo)
     await model_repo.create(model)
 
-    result = await service.confirm_upload_from_object_key(f"{owner_id}/fraud/other-model/v3.4")
+    result = await service.confirm_upload_from_object_key(f"{owner_id}/fraud/other-model/crappy-shit.pkl")
 
     assert result is False
 
@@ -651,17 +673,18 @@ async def test_confirm_upload_from_object_key_marks_model_ready(model_dependenci
         repository_id=repo.id,
         name="fraud-detector",
         version="3.4",
+        s3_uri=f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/crappy-shit.pkl",
     )
     await resource_repo.create(repo_resource)
     await resource_repo.create(model_resource)
     await model_repo_repo.create(repo)
     await model_repo.create(model)
 
-    result = await service.confirm_upload_from_object_key(f"{owner_id}/fraud/fraud-detector/v3.4")
+    result = await service.confirm_upload_from_object_key(f"{owner_id}/fraud/fraud-detector/crappy-shit.pkl")
 
     assert result is True
     assert model_repo.models[model.id].status == "READY"
-    assert model_repo.updated_s3_uris == [(model.id, f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/v3.4")]
+    assert model_repo.updated_s3_uris == [(model.id, f"s3://{MODELS_BUCKET}/{owner_id}/fraud/fraud-detector/crappy-shit.pkl")]
 
 
 @pytest.mark.asyncio

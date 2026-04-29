@@ -1,13 +1,15 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from src.config import get_settings
 from src.infrastructure.database import models  # noqa: F401 — register all ORM models
 from src.infrastructure.database.session import Base, configure_database
 from src.presentation.api.v1 import (
+    datasets,
     experiments,
     health,
-    datasets,
     models as models_router,
     users,
 )
@@ -35,6 +37,16 @@ def create_app(**database_overrides) -> FastAPI:
         lifespan=lifespan,
     )
     configure_database(app, **database_overrides)
+    settings = get_settings()
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origins,
+        allow_origin_regex=settings.cors_allowed_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(users.router, prefix="/api/v1", tags=["users"])

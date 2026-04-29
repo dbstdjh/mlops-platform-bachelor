@@ -40,6 +40,13 @@ class ModelStatusORM(Base):
     name = Column(String, unique=True, nullable=False)
 
 
+class FileTypeORM(Base):
+    __tablename__ = "file_type"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False)
+
+
 class DeploymentStatusORM(Base):
     __tablename__ = "deployment_status"
 
@@ -198,6 +205,7 @@ class ModelORM(Base):
     is_deleted = Column(Boolean, nullable=False, default=False)
     s3_uri = Column(String, nullable=True)
     status_id = Column(UUID(as_uuid=True), ForeignKey("model_status.id"), nullable=False)
+    file_type_id = Column(UUID(as_uuid=True), ForeignKey("file_type.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -208,8 +216,10 @@ class DashboardORM(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
+    kind = Column(String, nullable=False, default="RUN_PLOT")
     grafana_uid = Column(String, unique=True, nullable=True)
     is_system_locked = Column(Boolean, nullable=False, default=False)
+    config_data = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -218,6 +228,7 @@ class RunDashboardORM(Base):
 
     id = Column(UUID(as_uuid=True), ForeignKey("dashboard.id", ondelete="CASCADE"), primary_key=True)
     run_id = Column(UUID(as_uuid=True), ForeignKey("run.id", ondelete="CASCADE"), nullable=False)
+    display_order = Column(Integer, nullable=False, default=0)
 
 
 class DeploymentDashboardORM(Base):

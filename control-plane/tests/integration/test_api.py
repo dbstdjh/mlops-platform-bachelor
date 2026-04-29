@@ -10,6 +10,7 @@ import pickle
 
 import pytest
 
+from src.infrastructure.observability.grafana import HttpGrafanaDashboardClient
 
 async def upload_bytes(url: str, payload: bytes) -> None:
     async with httpx.AsyncClient(trust_env=False) as storage_client:
@@ -26,6 +27,20 @@ async def download_bytes(url: str) -> bytes:
 
 @pytest.mark.asyncio
 class TestAuthAPI:
+    async def test_login_preflight_is_allowed_for_local_dashboard_origin(self, anonymous_client):
+        response = await anonymous_client.options(
+            "/api/v1/users:login",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert "POST" in response.headers["access-control-allow-methods"]
+
     async def test_register_login_and_get_profile(self, anonymous_client):
         register_response = await anonymous_client.post(
             "/api/v1/users:register",
@@ -75,11 +90,13 @@ class TestAuthAPI:
         assert create_key_response.status_code == 201
         key_data = create_key_response.json()
         assert key_data["name"] == "sdk"
+        assert len(key_data["prefix"]) == 12
         assert key_data["api_key"].startswith("mlp_")
 
         list_keys_response = await client.get("/api/v1/users/me/api-keys")
         assert list_keys_response.status_code == 200
         assert list_keys_response.json()[0]["name"] == key_data["name"]
+        assert list_keys_response.json()[0]["prefix"] == key_data["prefix"]
         assert "api_key" not in list_keys_response.json()[0]
 
         exchange_response = await anonymous_client.post(
@@ -195,6 +212,7 @@ class TestModelRegistryAPI:
         assert data["version"] == "1.0"
         assert data["repository_slug"] == repo_slug
         assert data["status"] == "PENDING"
+        assert data["file_type"] == "undefined"
 
     async def test_list_models_in_repository(self, client):
         repo_resp = await client.post("/api/v1/repositories", json={
@@ -227,13 +245,17 @@ class TestModelRegistryAPI:
             "version": "1.0",
         })
 
-        upload_resp = await client.post(f"/api/v1/repositories/{repo_slug}/models/1.0:upload")
+        upload_resp = await client.post(
+            f"/api/v1/repositories/{repo_slug}/models/1.0:upload",
+            json={"file_name": "crappy-shit.pkl"},
+        )
         assert upload_resp.status_code == 200
         data = upload_resp.json()
         assert "upload_url" in data
         assert data["repository_slug"] == repo_slug
         assert data["version"] == "1.0"
         assert "models" in data["upload_url"]  # Verify it targets the models bucket
+        assert "crappy-shit.pkl" in data["upload_url"]
 
     async def test_confirm_upload_marks_model_ready_and_enables_download(self, client):
         repo_resp = await client.post("/api/v1/repositories", json={
@@ -245,7 +267,10 @@ class TestModelRegistryAPI:
             "name": "pickle-model",
             "version": "1.0",
         })
-        upload_resp = await client.post(f"/api/v1/repositories/{repo_slug}/models/1.0:upload")
+        upload_resp = await client.post(
+            f"/api/v1/repositories/{repo_slug}/models/1.0:upload",
+            json={"file_name": "pickle-model.pkl"},
+        )
         upload_url = upload_resp.json()["upload_url"]
         payload = pickle.dumps({"model": "integration", "version": "1.0"})
         await upload_bytes(upload_url, payload)
@@ -261,12 +286,45 @@ class TestModelRegistryAPI:
         model_resp = await client.get(f"/api/v1/repositories/{repo_slug}/models/1.0")
         assert model_resp.status_code == 200
         assert model_resp.json()["status"] == "READY"
+        assert model_resp.json()["file_type"] == "pickle"
 
         download_resp = await client.get(f"/api/v1/repositories/{repo_slug}/models/1.0:download")
         assert download_resp.status_code == 200
         download_url = download_resp.json()["download_url"]
         downloaded = await download_bytes(download_url)
         assert downloaded == payload
+
+    async def test_confirm_upload_reuses_existing_ready_status_without_unique_conflict(self, client):
+        repo_resp = await client.post("/api/v1/repositories", json={"name": "test-multi-confirm-repo"})
+        repo_slug = repo_resp.json()["slug"]
+
+        for version in ("1.0", "2.0"):
+            create_resp = await client.post(
+                f"/api/v1/repositories/{repo_slug}/models",
+                json={"name": "status-reuse-model", "version": version},
+            )
+            assert create_resp.status_code == 201
+
+            upload_resp = await client.post(
+                f"/api/v1/repositories/{repo_slug}/models/{version}:upload",
+                json={"file_name": f"status-reuse-model-v{version}.pkl"},
+            )
+            assert upload_resp.status_code == 200
+            upload_url = upload_resp.json()["upload_url"]
+            object_key = upload_url.split("/models/", maxsplit=1)[1].split("?", maxsplit=1)[0]
+            await upload_bytes(upload_url, pickle.dumps({"version": version}))
+
+            confirm_resp = await client.post(
+                "/api/v1/models:confirm_upload",
+                json={"Records": [{"s3": {"object": {"key": object_key}}}]},
+            )
+            assert confirm_resp.status_code == 200
+            assert confirm_resp.json() == {"status": "ok"}
+
+            model_resp = await client.get(f"/api/v1/repositories/{repo_slug}/models/{version}")
+            assert model_resp.status_code == 200
+            assert model_resp.json()["status"] == "READY"
+            assert model_resp.json()["file_type"] == "pickle"
 
     async def test_get_model_by_id(self, client):
         repo_resp = await client.post("/api/v1/repositories", json={
@@ -284,6 +342,7 @@ class TestModelRegistryAPI:
         assert response.json()["repository_slug"] == repo_slug
         assert response.json()["version"] == "1.0"
         assert response.json()["status"] == "PENDING"
+        assert response.json()["file_type"] == "undefined"
 
 
 @pytest.mark.asyncio
@@ -503,3 +562,53 @@ class TestExperimentTrackingAPI:
         })
         assert model_resp.status_code == 201
         assert model_resp.json()["run"] == {"experiment_slug": experiment_slug, "run_number": 1}
+
+    async def test_run_dashboard_crud(self, client, monkeypatch):
+        async def fake_upsert(self, **kwargs):
+            return kwargs["grafana_uid"] or "grafana-run-plot"
+
+        async def fake_delete(self, grafana_uid: str):
+            return None
+
+        monkeypatch.setattr(HttpGrafanaDashboardClient, "upsert_run_plot", fake_upsert)
+        monkeypatch.setattr(HttpGrafanaDashboardClient, "delete_dashboard", fake_delete)
+        monkeypatch.setattr(
+            HttpGrafanaDashboardClient,
+            "build_solo_iframe_url",
+            lambda self, grafana_uid: f"http://grafana.local/d-solo/{grafana_uid}/run-plot?panelId=1",
+        )
+
+        experiment_resp = await client.post("/api/v1/experiments", json={
+            "name": "dashboard-experiment",
+            "logged_data_template": ["loss", "accuracy"],
+        })
+        experiment_slug = experiment_resp.json()["slug"]
+        run_resp = await client.post(f"/api/v1/experiments/{experiment_slug}/runs", json={})
+        assert run_resp.status_code == 201
+
+        create_resp = await client.post(
+            f"/api/v1/experiments/{experiment_slug}/runs/1/dashboards",
+            json={"title": "Loss plot", "plot_type": "line", "metrics": ["loss"]},
+        )
+        assert create_resp.status_code == 201
+        dashboard_id = create_resp.json()["id"]
+        assert create_resp.json()["iframe_url"].endswith("grafana-run-plot/run-plot?panelId=1")
+
+        list_resp = await client.get(f"/api/v1/experiments/{experiment_slug}/runs/1/dashboards")
+        assert list_resp.status_code == 200
+        assert list_resp.json()[0]["title"] == "Loss plot"
+
+        update_resp = await client.patch(
+            f"/api/v1/experiments/{experiment_slug}/runs/1/dashboards/{dashboard_id}",
+            json={"title": "Accuracy stat", "plot_type": "stat", "metrics": ["accuracy"], "display_order": 0},
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["plot_type"] == "stat"
+        assert update_resp.json()["metrics"] == ["accuracy"]
+
+        delete_resp = await client.delete(f"/api/v1/experiments/{experiment_slug}/runs/1/dashboards/{dashboard_id}")
+        assert delete_resp.status_code == 204
+
+        list_after_delete = await client.get(f"/api/v1/experiments/{experiment_slug}/runs/1/dashboards")
+        assert list_after_delete.status_code == 200
+        assert list_after_delete.json() == []

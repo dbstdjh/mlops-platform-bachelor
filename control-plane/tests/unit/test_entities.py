@@ -67,6 +67,7 @@ class TestModelEntity:
         assert model.s3_uri is None
         assert model.run_id is None
         assert model.status == "PENDING"
+        assert model.file_type == "undefined"
 
     def test_model_create_schema(self):
         data = ModelCreate(

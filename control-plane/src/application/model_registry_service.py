@@ -105,6 +105,7 @@ class ModelRegistryService:
             name=data.name,
             version=data.version,
             status="PENDING",
+            file_type="undefined",
         )
         await self._model_repo.create(model)
 
@@ -134,7 +135,13 @@ class ModelRegistryService:
             responses.append(await self._build_model_response(model, repo))
         return responses
 
-    async def get_upload_url(self, user_id: uuid.UUID, repo_slug: str, version: str) -> ModelUploadResponse | None:
+    async def get_upload_url(
+        self,
+        user_id: uuid.UUID,
+        repo_slug: str,
+        version: str,
+        file_name: str | None = None,
+    ) -> ModelUploadResponse | None:
         """Generate a pre-signed upload URL for model weights."""
         repo = await self._model_repo_repo.get_by_slug(user_id, repo_slug)
         if not repo:
@@ -145,11 +152,13 @@ class ModelRegistryService:
             return None
 
         # Build the S3 object path
-        object_name = f"{repo.user_id}/{repo.slug}/{model.name}/v{model.version}"
+        resolved_file_name = self._resolve_upload_file_name(model, file_name)
+        object_name = f"{repo.user_id}/{repo.slug}/{model.name}/{resolved_file_name}"
         upload_url = await self._storage.generate_upload_url(MODELS_BUCKET, object_name)
 
         s3_uri = f"s3://{MODELS_BUCKET}/{object_name}"
         await self._model_repo.update_s3_uri(model.id, s3_uri)
+        await self._model_repo.update_file_type(model.id, self._infer_file_type_from_name(resolved_file_name))
 
         return ModelUploadResponse(repository_slug=repo.slug, version=model.version, upload_url=upload_url)
 
@@ -182,21 +191,17 @@ class ModelRegistryService:
         except ValueError:
             return False
 
+        s3_uri = f"s3://{MODELS_BUCKET}/{object_key}"
+        model = await self._model_repo.get_by_s3_uri(s3_uri)
+        if not model:
+            return False
+
         repo_slug = parts[1]
         model_name = parts[2]
-        version_part = PurePosixPath(parts[3]).name
-        if not version_part.startswith("v"):
-            return False
-        version = version_part.removeprefix("v")
-        if not version:
-            return False
-
-        repo = await self._model_repo_repo.get_by_slug(user_id, repo_slug)
+        repo = await self._model_repo_repo.get_by_id(model.repository_id)
         if not repo:
             return False
-
-        model = await self._model_repo.get_by_version(repo.id, version)
-        if not model or model.name != model_name:
+        if repo.user_id != user_id or repo.slug != repo_slug or model.name != model_name:
             return False
 
         return await self._mark_model_ready(model, object_key)
@@ -236,6 +241,7 @@ class ModelRegistryService:
             is_deleted=model.is_deleted,
             s3_uri=model.s3_uri,
             status=model.status,
+            file_type=model.file_type,
             created_at=model.created_at,
             labels=labels,
         )
@@ -243,6 +249,22 @@ class ModelRegistryService:
     def _object_name_from_s3_uri(self, s3_uri: str) -> str:
         parts = PurePosixPath(s3_uri.replace(f"s3://{MODELS_BUCKET}/", "")).parts
         return "/".join(parts)
+
+    def _resolve_upload_file_name(self, model: Model, file_name: str | None) -> str:
+        if file_name is None:
+            return f"{model.name}-v{model.version}"
+
+        candidate = str(file_name).strip()
+        normalized = PurePosixPath(candidate.replace("\\", "/")).name
+        if normalized in {"", ".", ".."}:
+            raise ValueError("file_name must contain a valid filename")
+        return normalized
+
+    def _infer_file_type_from_name(self, file_name: str) -> str:
+        normalized = file_name.strip().lower()
+        if normalized.endswith(".pkl") or normalized.endswith(".pickle"):
+            return "pickle"
+        return "undefined"
 
     async def _mark_model_ready(self, model: Model, object_name: str) -> bool:
         s3_uri = f"s3://{MODELS_BUCKET}/{object_name}"

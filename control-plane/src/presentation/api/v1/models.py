@@ -8,7 +8,7 @@ from urllib.parse import unquote_plus
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.application.model_registry_service import ModelRegistryService
-from src.core.entities.model import ModelCreate, ModelResponse, ModelUploadResponse
+from src.core.entities.model import ModelCreate, ModelResponse, ModelUploadRequest, ModelUploadResponse
 from src.core.entities.model_repository import (
     ModelRepositoryCreate,
     ModelRepositoryResponse,
@@ -111,11 +111,20 @@ async def get_model_download_url(
 async def get_model_upload_url(
     repository_slug: str,
     version: str,
+    data: ModelUploadRequest | None = None,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ):
     """Get a pre-signed upload URL for model weights."""
-    result = await service.get_upload_url(user_id, repository_slug, version)
+    try:
+        result = await service.get_upload_url(
+            user_id,
+            repository_slug,
+            version,
+            file_name=None if data is None else data.file_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Model not found")
     return result

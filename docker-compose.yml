@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mlops"]
+      test: [ "CMD-SHELL", "pg_isready -U mlops" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -32,12 +32,12 @@ services:
       MINIO_NOTIFY_WEBHOOK_ENABLE_fastapi_models: "on"
       MINIO_NOTIFY_WEBHOOK_ENDPOINT_fastapi_models: "http://api:8000/api/v1/models:confirm_upload"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -49,20 +49,15 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      echo 'Configuring MinIO...';
+      /bin/sh -c " echo 'Configuring MinIO...';
 
       /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
 
-      /usr/bin/mc mb myminio/datasets --ignore-existing;
-      /usr/bin/mc mb myminio/models --ignore-existing;
+      /usr/bin/mc mb myminio/datasets --ignore-existing; /usr/bin/mc mb myminio/models --ignore-existing;
 
-      /usr/bin/mc event add myminio/datasets arn:minio:sqs::fastapi:webhook --event put || true;
-      /usr/bin/mc event add myminio/models arn:minio:sqs::fastapi_models:webhook --event put || true;
+      /usr/bin/mc event add myminio/datasets arn:minio:sqs::fastapi:webhook --event put || true; /usr/bin/mc event add myminio/models arn:minio:sqs::fastapi_models:webhook --event put || true;
 
-      echo 'MinIO initialized successfully.';
-      exit 0;
-      "
+      echo 'MinIO initialized successfully.'; exit 0; "
 
   # Gitea — Artifact registry with unified MinIO storage
   gitea:
@@ -126,7 +121,7 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
       # PostgreSQL datasource will be provisioned via API at runtime
 
-  # Control Plane API — FastAPI backend
+      # Control Plane API — FastAPI backend
   api:
     build:
       context: ./control-plane
@@ -150,6 +145,7 @@ services:
       - GITEA_URL=http://gitea:3000
       - GITEA_ADMIN_TOKEN=${GITEA_ADMIN_TOKEN:-}
       - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_PUBLIC_URL=http://localhost:3001
       - GRAFANA_ADMIN_TOKEN=${GRAFANA_ADMIN_TOKEN:-}
       - SECRET_KEY=${SECRET_KEY:-super-secret-dev-key-change-in-prod}
     volumes:

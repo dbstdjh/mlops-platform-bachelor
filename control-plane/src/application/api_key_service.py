@@ -43,6 +43,7 @@ class ApiKeyService:
 
         return ApiKeyIssuedResponse(
             name=api_key.name,
+            prefix=api_key.prefix,
             is_revoked=api_key.is_revoked,
             created_at=api_key.created_at,
             api_key=raw_key,
@@ -53,6 +54,7 @@ class ApiKeyService:
         return [
             ApiKeyResponse(
                 name=key.name,
+                prefix=key.prefix,
                 is_revoked=key.is_revoked,
                 created_at=key.created_at,
             )

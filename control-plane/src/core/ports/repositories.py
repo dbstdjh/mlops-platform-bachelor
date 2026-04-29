@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
+from src.core.entities.dashboard import Dashboard, RunDashboardRecord
 from src.core.entities.resource import Resource
 from src.core.entities.experiment_tracking import Experiment, Run, RunStep
 from src.core.entities.model_repository import ModelRepository
@@ -79,6 +80,14 @@ class ModelRepo(ABC):
 
     @abstractmethod
     async def update_s3_uri(self, model_id: uuid.UUID, s3_uri: str) -> Optional[Model]:
+        ...
+
+    @abstractmethod
+    async def update_file_type(self, model_id: uuid.UUID, file_type: str) -> Optional[Model]:
+        ...
+
+    @abstractmethod
+    async def get_by_s3_uri(self, s3_uri: str) -> Optional[Model]:
         ...
 
     @abstractmethod
@@ -231,4 +240,43 @@ class ApiKeyRepo(ABC):
 
     @abstractmethod
     async def revoke(self, user_id: uuid.UUID, name: str) -> bool:
+        ...
+
+
+class DashboardRepo(ABC):
+    """Port for saved dashboard persistence."""
+
+    @abstractmethod
+    async def create_run_dashboard(
+        self,
+        dashboard: Dashboard,
+        *,
+        run_id: uuid.UUID,
+        display_order: int,
+    ) -> RunDashboardRecord:
+        ...
+
+    @abstractmethod
+    async def list_by_run(self, run_id: uuid.UUID) -> list[RunDashboardRecord]:
+        ...
+
+    @abstractmethod
+    async def get_by_id_for_run(self, run_id: uuid.UUID, dashboard_id: uuid.UUID) -> Optional[RunDashboardRecord]:
+        ...
+
+    @abstractmethod
+    async def update_run_dashboard(
+        self,
+        run_id: uuid.UUID,
+        dashboard_id: uuid.UUID,
+        *,
+        name: str | None = None,
+        grafana_uid: str | None = None,
+        config_data: dict | None = None,
+        display_order: int | None = None,
+    ) -> Optional[RunDashboardRecord]:
+        ...
+
+    @abstractmethod
+    async def delete_run_dashboard(self, run_id: uuid.UUID, dashboard_id: uuid.UUID) -> bool:
         ...

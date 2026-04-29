@@ -6,6 +6,9 @@ import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.entities.dashboard import Dashboard, RunDashboardCreate, RunDashboardResponse, RunDashboardUpdate
 from src.core.entities.experiment_tracking import (
     DatasetRef,
     Experiment,
@@ -26,7 +29,9 @@ from src.core.entities.experiment_tracking import (
     RunSummaryResponse,
 )
 from src.core.entities.resource import Resource
+from src.core.ports.observability import GrafanaDashboardClient
 from src.core.ports.repositories import (
+    DashboardRepo,
     DatasetRepo,
     ExperimentRepo,
     ModelRepo,
@@ -62,6 +67,9 @@ class ExperimentTrackingService:
         dataset_repo: DatasetRepo,
         model_repo: ModelRepo,
         model_repository_repo: ModelRepositoryRepo,
+        dashboard_repo: DashboardRepo,
+        grafana_client: GrafanaDashboardClient,
+        session: AsyncSession | None = None,
     ):
         self._experiment_repo = experiment_repo
         self._run_repo = run_repo
@@ -70,6 +78,9 @@ class ExperimentTrackingService:
         self._dataset_repo = dataset_repo
         self._model_repo = model_repo
         self._model_repository_repo = model_repository_repo
+        self._dashboard_repo = dashboard_repo
+        self._grafana_client = grafana_client
+        self._session = session
 
     async def create_experiment(self, user_id: uuid.UUID, data: ExperimentCreate) -> ExperimentResponse:
         slug = await self._generate_unique_slug(user_id, data.name)
@@ -84,6 +95,7 @@ class ExperimentTrackingService:
             logged_data_template=data.logged_data_template,
         )
         await self._experiment_repo.create(experiment)
+        await self._commit_session()
         return await self._build_experiment_response(experiment)
 
     async def list_experiments(self, user_id: uuid.UUID) -> list[ExperimentResponse]:
@@ -111,6 +123,7 @@ class ExperimentTrackingService:
             status="RUNNING",
         )
         await self._run_repo.create(run)
+        await self._commit_session()
         return await self._build_run_response(experiment, run)
 
     async def list_runs(self, user_id: uuid.UUID, experiment_slug: str) -> list[RunResponse]:
@@ -148,6 +161,7 @@ class ExperimentTrackingService:
             for item in normalized_items
         ]
         await self._run_step_repo.upsert_batch(steps)
+        await self._commit_session()
 
     async def complete_run(self, user_id: uuid.UUID, experiment_slug: str, run_number: int) -> RunResponse:
         experiment, run = await self._get_experiment_and_run_or_raise(user_id, experiment_slug, run_number)
@@ -155,6 +169,7 @@ class ExperimentTrackingService:
         updated = await self._run_repo.update_status(run.id, "COMPLETED", ended_at=datetime.now(timezone.utc))
         if not updated:
             raise ExperimentTrackingNotFoundError("Run not found")
+        await self._commit_session()
         return await self._build_run_response(experiment, updated)
 
     async def fail_run(self, user_id: uuid.UUID, experiment_slug: str, run_number: int) -> RunResponse:
@@ -163,6 +178,7 @@ class ExperimentTrackingService:
         updated = await self._run_repo.update_status(run.id, "FAILED", ended_at=datetime.now(timezone.utc))
         if not updated:
             raise ExperimentTrackingNotFoundError("Run not found")
+        await self._commit_session()
         return await self._build_run_response(experiment, updated)
 
     async def get_metrics(self, user_id: uuid.UUID, experiment_slug: str) -> ExperimentMetricsResponse:
@@ -203,6 +219,152 @@ class ExperimentTrackingService:
             metric_name=metric_name,
             points=await self._build_plot_points(run.id, metric_name),
         )
+
+    async def list_run_dashboards(
+        self,
+        user_id: uuid.UUID,
+        experiment_slug: str,
+        run_number: int,
+    ) -> list[RunDashboardResponse]:
+        _experiment, run = await self._get_experiment_and_run_or_raise(user_id, experiment_slug, run_number)
+        dashboards = await self._dashboard_repo.list_by_run(run.id)
+        return [self._build_run_dashboard_response(item) for item in dashboards]
+
+    async def create_run_dashboard(
+        self,
+        user_id: uuid.UUID,
+        experiment_slug: str,
+        run_number: int,
+        data: RunDashboardCreate,
+    ) -> RunDashboardResponse:
+        experiment, run = await self._get_experiment_and_run_or_raise(user_id, experiment_slug, run_number)
+        self._ensure_requested_metrics_are_defined(experiment, data.metrics)
+
+        existing = await self._dashboard_repo.list_by_run(run.id)
+        if len(existing) >= 4:
+            raise ExperimentTrackingValidationError("A run can only have up to 4 saved plots")
+
+        grafana_uid = await self._grafana_client.upsert_run_plot(
+            grafana_uid=None,
+            title=data.title,
+            run_id=run.id,
+            plot_type=data.plot_type,
+            metrics=data.metrics,
+        )
+        dashboard = Dashboard(
+            name=data.title,
+            grafana_uid=grafana_uid,
+            config_data={"plot_type": data.plot_type, "metrics": data.metrics},
+        )
+
+        try:
+            created = await self._dashboard_repo.create_run_dashboard(
+                dashboard,
+                run_id=run.id,
+                display_order=len(existing),
+            )
+            await self._commit_session()
+        except Exception:
+            await self._rollback_session()
+            await self._grafana_client.delete_dashboard(grafana_uid)
+            raise
+
+        return self._build_run_dashboard_response(created)
+
+    async def update_run_dashboard(
+        self,
+        user_id: uuid.UUID,
+        experiment_slug: str,
+        run_number: int,
+        dashboard_id: uuid.UUID,
+        data: RunDashboardUpdate,
+    ) -> RunDashboardResponse:
+        experiment, run = await self._get_experiment_and_run_or_raise(user_id, experiment_slug, run_number)
+        existing = await self._dashboard_repo.get_by_id_for_run(run.id, dashboard_id)
+        if not existing:
+            raise ExperimentTrackingNotFoundError("Run dashboard not found")
+
+        final_title = data.title or existing.title
+        final_plot_type = data.plot_type or existing.plot_type
+        final_metrics = data.metrics or existing.metrics
+        candidate = RunDashboardCreate(title=final_title, plot_type=final_plot_type, metrics=final_metrics)
+        self._ensure_requested_metrics_are_defined(experiment, candidate.metrics)
+
+        grafana_changed = (
+            candidate.title != existing.title
+            or candidate.plot_type != existing.plot_type
+            or candidate.metrics != existing.metrics
+        )
+        if grafana_changed:
+            await self._grafana_client.upsert_run_plot(
+                grafana_uid=existing.grafana_uid,
+                title=candidate.title,
+                run_id=run.id,
+                plot_type=candidate.plot_type,
+                metrics=candidate.metrics,
+            )
+
+        try:
+            updated = await self._dashboard_repo.update_run_dashboard(
+                run.id,
+                dashboard_id,
+                name=candidate.title,
+                grafana_uid=existing.grafana_uid,
+                config_data={"plot_type": candidate.plot_type, "metrics": candidate.metrics},
+            )
+            if not updated:
+                raise ExperimentTrackingNotFoundError("Run dashboard not found")
+
+            if data.display_order is not None:
+                updated = await self._reorder_run_dashboards(run.id, dashboard_id, data.display_order)
+
+            await self._commit_session()
+        except Exception:
+            await self._rollback_session()
+            if grafana_changed:
+                await self._grafana_client.upsert_run_plot(
+                    grafana_uid=existing.grafana_uid,
+                    title=existing.title,
+                    run_id=run.id,
+                    plot_type=existing.plot_type,
+                    metrics=existing.metrics,
+                )
+            raise
+
+        return self._build_run_dashboard_response(updated)
+
+    async def delete_run_dashboard(
+        self,
+        user_id: uuid.UUID,
+        experiment_slug: str,
+        run_number: int,
+        dashboard_id: uuid.UUID,
+    ) -> None:
+        _experiment, run = await self._get_experiment_and_run_or_raise(user_id, experiment_slug, run_number)
+        existing = await self._dashboard_repo.get_by_id_for_run(run.id, dashboard_id)
+        if not existing:
+            raise ExperimentTrackingNotFoundError("Run dashboard not found")
+
+        if existing.grafana_uid:
+            await self._grafana_client.delete_dashboard(existing.grafana_uid)
+
+        try:
+            deleted = await self._dashboard_repo.delete_run_dashboard(run.id, dashboard_id)
+            if not deleted:
+                raise ExperimentTrackingNotFoundError("Run dashboard not found")
+            await self._reindex_run_dashboards(run.id)
+            await self._commit_session()
+        except Exception:
+            await self._rollback_session()
+            if existing.grafana_uid:
+                await self._grafana_client.upsert_run_plot(
+                    grafana_uid=existing.grafana_uid,
+                    title=existing.title,
+                    run_id=run.id,
+                    plot_type=existing.plot_type,
+                    metrics=existing.metrics,
+                )
+            raise
 
     async def _build_experiment_response(self, experiment: Experiment) -> ExperimentResponse:
         resource = await self._resource_repo.get_by_id(experiment.resource_id)
@@ -259,6 +421,19 @@ class ExperimentTrackingService:
             model=model_ref,
             latest_metrics=latest_metrics,
             labels=resource.labels if resource else {},
+        )
+
+    def _build_run_dashboard_response(self, dashboard) -> RunDashboardResponse:
+        if not dashboard.grafana_uid:
+            raise ExperimentTrackingValidationError("Saved run plot is missing a Grafana UID")
+        return RunDashboardResponse(
+            id=dashboard.id,
+            title=dashboard.title,
+            plot_type=dashboard.plot_type,
+            metrics=dashboard.metrics,
+            display_order=dashboard.display_order,
+            iframe_url=self._grafana_client.build_solo_iframe_url(dashboard.grafana_uid),
+            created_at=dashboard.created_at,
         )
 
     async def _build_plot_points(self, run_id: uuid.UUID, metric_name: str) -> list[PlotPoint]:
@@ -323,6 +498,13 @@ class ExperimentTrackingService:
         if metric_name not in experiment.logged_data_template:
             raise ExperimentTrackingValidationError("Metric is not declared by the experiment")
 
+    def _ensure_requested_metrics_are_defined(self, experiment: Experiment, metric_names: list[str]) -> None:
+        invalid_metrics = sorted(set(metric_names) - set(experiment.logged_data_template))
+        if invalid_metrics:
+            raise ExperimentTrackingValidationError(
+                f"Metrics not declared by experiment: {', '.join(invalid_metrics)}"
+            )
+
     def _ensure_run_is_running(self, run: Run) -> None:
         if run.status != "RUNNING":
             raise ExperimentTrackingConflictError("Run is already terminal")
@@ -342,3 +524,37 @@ class ExperimentTrackingService:
             if not await self._experiment_repo.slug_exists(user_id, candidate):
                 return candidate
             index += 1
+
+    async def _reorder_run_dashboards(self, run_id: uuid.UUID, dashboard_id: uuid.UUID, target_index: int):
+        dashboards = await self._dashboard_repo.list_by_run(run_id)
+        if not dashboards:
+            raise ExperimentTrackingNotFoundError("Run dashboard not found")
+
+        target_index = max(0, min(target_index, len(dashboards) - 1))
+        moved = next((item for item in dashboards if item.id == dashboard_id), None)
+        if not moved:
+            raise ExperimentTrackingNotFoundError("Run dashboard not found")
+
+        reordered = [item for item in dashboards if item.id != dashboard_id]
+        reordered.insert(target_index, moved)
+        for index, item in enumerate(reordered):
+            await self._dashboard_repo.update_run_dashboard(run_id, item.id, display_order=index)
+
+        refreshed = await self._dashboard_repo.get_by_id_for_run(run_id, dashboard_id)
+        if not refreshed:
+            raise ExperimentTrackingNotFoundError("Run dashboard not found")
+        return refreshed
+
+    async def _reindex_run_dashboards(self, run_id: uuid.UUID) -> None:
+        dashboards = await self._dashboard_repo.list_by_run(run_id)
+        for index, dashboard in enumerate(dashboards):
+            if dashboard.display_order != index:
+                await self._dashboard_repo.update_run_dashboard(run_id, dashboard.id, display_order=index)
+
+    async def _commit_session(self) -> None:
+        if self._session is not None:
+            await self._session.commit()
+
+    async def _rollback_session(self) -> None:
+        if self._session is not None:
+            await self._session.rollback()

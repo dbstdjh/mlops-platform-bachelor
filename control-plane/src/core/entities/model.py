@@ -7,11 +7,14 @@ Each model is linked to a specific training run and stored in MinIO.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from src.core.entities.experiment_tracking import RunRef
+
+
+ModelFileType = Literal["pickle", "undefined"]
 
 
 class Model(BaseModel):
@@ -25,6 +28,7 @@ class Model(BaseModel):
     is_deleted: bool = False
     s3_uri: Optional[str] = None
     status: str = "PENDING"
+    file_type: ModelFileType = "undefined"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -45,6 +49,7 @@ class ModelResponse(BaseModel):
     is_deleted: bool
     s3_uri: Optional[str] = None
     status: str
+    file_type: ModelFileType
     created_at: datetime
     labels: dict = Field(default_factory=dict)
 
@@ -56,3 +61,9 @@ class ModelUploadResponse(BaseModel):
     repository_slug: str
     version: str
     upload_url: str
+
+
+class ModelUploadRequest(BaseModel):
+    """Optional upload metadata supplied before requesting a signed URL."""
+
+    file_name: str | None = None

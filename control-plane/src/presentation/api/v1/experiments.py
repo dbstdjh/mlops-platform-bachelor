@@ -22,6 +22,7 @@ from src.core.entities.experiment_tracking import (
     RunResponse,
     RunStepBatchCreate,
 )
+from src.core.entities.dashboard import RunDashboardCreate, RunDashboardResponse, RunDashboardUpdate
 from src.presentation.dependencies import get_current_user_id, get_experiment_tracking_service
 
 router = APIRouter()
@@ -199,3 +200,81 @@ async def get_run_metric_plot(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ExperimentTrackingValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/experiments/{experiment_slug}/runs/{run_number}/dashboards",
+    response_model=list[RunDashboardResponse],
+)
+async def list_run_dashboards(
+    experiment_slug: str,
+    run_number: int,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
+):
+    """List saved dashboards for a run."""
+    try:
+        return await service.list_run_dashboards(user_id, experiment_slug, run_number)
+    except ExperimentTrackingNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/experiments/{experiment_slug}/runs/{run_number}/dashboards",
+    response_model=RunDashboardResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_run_dashboard(
+    experiment_slug: str,
+    run_number: int,
+    data: RunDashboardCreate,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
+):
+    """Create a saved run dashboard."""
+    try:
+        return await service.create_run_dashboard(user_id, experiment_slug, run_number, data)
+    except ExperimentTrackingNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExperimentTrackingValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/experiments/{experiment_slug}/runs/{run_number}/dashboards/{dashboard_id}",
+    response_model=RunDashboardResponse,
+)
+async def update_run_dashboard(
+    experiment_slug: str,
+    run_number: int,
+    dashboard_id: uuid.UUID,
+    data: RunDashboardUpdate,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
+):
+    """Update a saved run dashboard."""
+    try:
+        return await service.update_run_dashboard(user_id, experiment_slug, run_number, dashboard_id, data)
+    except ExperimentTrackingNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExperimentTrackingValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/experiments/{experiment_slug}/runs/{run_number}/dashboards/{dashboard_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_run_dashboard(
+    experiment_slug: str,
+    run_number: int,
+    dashboard_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
+):
+    """Delete a saved run dashboard."""
+    try:
+        await service.delete_run_dashboard(user_id, experiment_slug, run_number, dashboard_id)
+    except ExperimentTrackingNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return None

@@ -28,7 +28,7 @@ An event-driven service responsible for actualizing models. It is triggered via 
 The primary interface for data scientists. It interacts with the Control Plane for all platform management tasks, dataset handling, and model deployments.
 
 ### Web App Dashboard (React + Tailwind CSS)
-A purely read-only dashboard designed for observability. It allows users to view system states, experiments, and model performance. Data processing is kept minimal on the frontend; the backend structures data specifically for easy UI rendering.
+A read-optimized observability dashboard. It allows users to view system states, experiments, and model performance, while also managing saved run plots and API keys. Data processing stays minimal on the frontend; the backend still structures data for easy UI rendering and Grafana embedding.
 
 ## Core Infrastructure
 - **PostgreSQL:** The central database for all structured data and metadata, as well as message brokering.
