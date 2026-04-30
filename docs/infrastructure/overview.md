@@ -1,6 +1,6 @@
 # Infrastructure Overview
 
-The MLOps platform utilizes a distributed infrastructure stack designed to run locally (e.g., via Docker Compose and Minikube) while enforcing production-grade architectural patterns. The infrastructure prioritizes strict separation of concerns, asynchronous processing, and robust networking solutions to avoid common deployment pitfalls.
+The MLOps platform utilizes a distributed infrastructure stack designed to run locally on Kubernetes/Minikube while enforcing production-grade architectural patterns. The infrastructure prioritizes strict separation of concerns, asynchronous processing, and robust networking solutions to avoid common deployment pitfalls.
 
 ## Core Components
 

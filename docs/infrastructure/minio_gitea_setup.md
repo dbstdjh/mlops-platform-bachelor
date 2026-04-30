@@ -1,6 +1,6 @@
 # Storage and Registry Infrastructure (MinIO & Gitea)
 
-The platform relies on Docker Compose to orchestrate local instances of MinIO and Gitea. Together with PostgreSQL, these services form the foundational storage and artifact registry layer. 
+The platform relies on Kubernetes/Minikube to orchestrate local instances of MinIO and Gitea. Together with PostgreSQL, these services form the foundational storage and artifact registry layer.
 
 Rather than just standing up isolated services, MinIO and Gitea are deeply integrated to support specific MLOps workflows, such as event-driven dataset ingestion and unified storage management.
 

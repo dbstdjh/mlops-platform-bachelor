@@ -210,12 +210,14 @@ export function RunDetailPage() {
               <p className="font-mono text-xs uppercase tracking-[0.24em] text-stone-500">Linked resources</p>
               <div className="space-y-4">
                 <ResourceRow
+                  accessibleLabel="Attached dataset"
                   detail={run.dataset ? `Version ${run.dataset.version}` : "No dataset linked"}
                   href={run.dataset ? `/datasets/${run.dataset.dataset_slug}/versions/${run.dataset.version}` : null}
                   label="Dataset"
                   name={run.dataset?.dataset_slug ?? "No dataset linked"}
                 />
                 <ResourceRow
+                  accessibleLabel="Produced model"
                   detail={run.model ? `Version ${run.model.version}` : "No model linked"}
                   href={run.model ? `/repositories/${run.model.repository_slug}/models/${run.model.version}` : null}
                   label="Model"
@@ -420,11 +422,13 @@ function buildDashboardFrameRevision(dashboard: RunDashboard) {
 }
 
 function ResourceRow({
+  accessibleLabel,
   label,
   name,
   detail,
   href,
 }: {
+  accessibleLabel: string;
   label: string;
   name: string;
   detail: string;
@@ -448,7 +452,7 @@ function ResourceRow({
   }
 
   return (
-    <Link className="block" to={href}>
+    <Link aria-label={`${accessibleLabel}: ${name}. ${detail}`} className="block" to={href}>
       {content}
     </Link>
   );

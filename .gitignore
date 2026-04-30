@@ -5,6 +5,7 @@ data-model.png
 .venv/
 __pycache__/
 .env
+k8s/base/secret.env
 dashboard/node_modules/
 dashboard/dist/
 dashboard/playwright-report/

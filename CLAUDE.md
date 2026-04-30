@@ -7,24 +7,25 @@
 
 The project is split into two phases. **Always check which phase is currently active before starting work.**
 
-### Phase 1: Pre-Kube (CURRENT)
+### Phase 1: Pre-Kube (COMPLETED)
 
-All work runs on a single Docker Compose stack. **Do NOT implement anything related to:**
-- Model Serving & Deployment module (control plane)
-- Deployment Service (worker)
-- Edge API Gateway (Go)
-- Kubernetes / Minikube
-- Custom model container images
+Phase 1 delivered the initial Control Plane, SDK, dashboard, storage, registry, and observability foundation. Docker Compose is no longer the local orchestration path.
 
-**In scope:**
-- Docker Compose infrastructure (PostgreSQL, MinIO, Gitea, Grafana)
+**Completed scope:**
 - Control Plane API: Users & IAM, Experiment Tracking, Model Versioning & Registry, Feature Registry, Observability, Artifact Registry
 - Python SDK
 - React Dashboard
+- PostgreSQL, MinIO, Gitea, and Grafana infrastructure
 
-### Phase 2: Post-Kube (FUTURE)
+### Phase 2: Post-Kube (CURRENT)
 
-Introduces Minikube, the Deployment Service, Edge Gateway, model containers, and the deployment module on the Control Plane. Do not begin this phase until Phase 1 is fully implemented and tested.
+Phase 2 introduces Minikube/Kubernetes as the local platform runtime, followed by the Deployment Service, Edge Gateway, model containers, and the deployment module on the Control Plane.
+
+**Current infrastructure baseline:**
+- Kubernetes manifests live under `k8s/base/` and are managed with Kustomize.
+- Local namespace: `mldlc`
+- Local Ingress hosts: `dashboard.mldlc.local`, `api.mldlc.local`, `minio.mldlc.local`, `console.minio.mldlc.local`, `gitea.mldlc.local`, `grafana.mldlc.local`
+- Use Minikube plus the ingress addon and `minikube tunnel` for local access.
 
 ## Documentation
 
@@ -64,7 +65,7 @@ This is a monorepo. Each deployable service is an independent package:
 ├── deployment-service/     # Event-driven deployment worker (Python)
 ├── edge-gateway/           # API Gateway (Go)
 ├── dashboard/              # React + Tailwind CSS web app
-├── docker-compose.yml      # Local infrastructure orchestration
+├── k8s/                    # Local Kubernetes manifests (Kustomize)
 └── Makefile                # Build, test, and run automation
 ```
 
@@ -95,9 +96,9 @@ This is a monorepo. Each deployable service is an independent package:
 ### Infrastructure
 
 - **PostgreSQL:** Central database and message broker (LISTEN/NOTIFY).
-- **MinIO:** S3-compatible object storage. Two buckets: `datasets` (with webhook) and `models` (no webhook).
+- **MinIO:** S3-compatible object storage. Buckets: `datasets` and `models` with upload webhooks, plus Gitea storage buckets.
 - **Gitea:** Artifact registry (Docker images) with unified MinIO storage backend.
-- **Kubernetes (Minikube):** Model container orchestration.
+- **Kubernetes (Minikube):** Local orchestration for platform services and model containers.
 - **Grafana:** Embedded monitoring and plotting.
 
 ## Key Architectural Rules
@@ -177,18 +178,23 @@ If any test fails, debug and fix the issue before reporting completion. Do not s
 ## Running the Platform Locally
 
 ```bash
-# Start infrastructure (PostgreSQL, MinIO, Gitea, Grafana)
-docker-compose up -d
+# Start Minikube before running the platform.
+minikube start
+minikube tunnel
 
-# Start the Control Plane
-cd control-plane && uv run uvicorn main:app --reload
+# Create local Kubernetes secrets. This file is ignored by git.
+cp k8s/base/secret.example.env k8s/base/secret.env
+# Edit k8s/base/secret.env before first deploy.
 
-# Start the Deployment Service
-cd deployment-service && uv run python worker.py
+# Add these hosts to /etc/hosts, pointing at the Minikube tunnel IP:
+# dashboard.mldlc.local api.mldlc.local minio.mldlc.local
+# console.minio.mldlc.local gitea.mldlc.local grafana.mldlc.local
 
-# Start the Edge Gateway
-cd edge-gateway && go run .
+# Build local images and apply Kubernetes manifests.
+make kube-up
 
-# Start the Dashboard
-cd dashboard && npm run dev
+# Check cluster state.
+make kube-status
 ```
+
+The dashboard is available at `http://dashboard.mldlc.local`. The API is available at `http://api.mldlc.local/api/v1`.
