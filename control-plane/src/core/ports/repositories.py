@@ -10,7 +10,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
-from src.core.entities.dashboard import Dashboard, RunDashboardRecord
+from src.core.entities.dashboard import Dashboard, DeploymentDashboardRecord, RunDashboardRecord
+from src.core.entities.deployment import Deployment, DeploymentTask, FileDeployment, ImageDeployment
 from src.core.entities.resource import Resource
 from src.core.entities.experiment_tracking import Experiment, Run, RunStep
 from src.core.entities.model_repository import ModelRepository
@@ -279,4 +280,85 @@ class DashboardRepo(ABC):
 
     @abstractmethod
     async def delete_run_dashboard(self, run_id: uuid.UUID, dashboard_id: uuid.UUID) -> bool:
+        ...
+
+    @abstractmethod
+    async def create_deployment_dashboard(
+        self,
+        dashboard: Dashboard,
+        *,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentDashboardRecord:
+        ...
+
+    @abstractmethod
+    async def list_by_deployment(self, deployment_id: uuid.UUID) -> list[DeploymentDashboardRecord]:
+        ...
+
+    @abstractmethod
+    async def get_by_id_for_deployment(
+        self,
+        deployment_id: uuid.UUID,
+        dashboard_id: uuid.UUID,
+    ) -> Optional[DeploymentDashboardRecord]:
+        ...
+
+    @abstractmethod
+    async def delete_deployment_dashboard(self, deployment_id: uuid.UUID, dashboard_id: uuid.UUID) -> bool:
+        ...
+
+
+class DeploymentRepo(ABC):
+    """Port for deployment persistence."""
+
+    @abstractmethod
+    async def create_file_deployment(
+        self,
+        deployment: Deployment,
+        file_deployment: FileDeployment,
+    ) -> Deployment:
+        ...
+
+    @abstractmethod
+    async def create_image_deployment(
+        self,
+        deployment: Deployment,
+        image_deployment: ImageDeployment,
+    ) -> Deployment:
+        ...
+
+    @abstractmethod
+    async def get_image_ref(self, deployment_id: uuid.UUID) -> Optional[str]:
+        ...
+
+    @abstractmethod
+    async def get_by_slug(self, user_id: uuid.UUID, slug: str) -> Optional[Deployment]:
+        ...
+
+    @abstractmethod
+    async def list_by_user(self, user_id: uuid.UUID) -> list[Deployment]:
+        ...
+
+    @abstractmethod
+    async def name_exists(self, user_id: uuid.UUID, name: str) -> bool:
+        ...
+
+    @abstractmethod
+    async def slug_exists(self, user_id: uuid.UUID, slug: str) -> bool:
+        ...
+
+    @abstractmethod
+    async def update_status(self, deployment_id: uuid.UUID, status: str) -> Optional[Deployment]:
+        ...
+
+    @abstractmethod
+    async def hard_delete(self, user_id: uuid.UUID, slug: str) -> bool:
+        ...
+
+
+class DeploymentTaskRepo(ABC):
+    """Port for deployment task persistence."""
+
+    @abstractmethod
+    async def create(self, task: DeploymentTask) -> DeploymentTask:
         ...

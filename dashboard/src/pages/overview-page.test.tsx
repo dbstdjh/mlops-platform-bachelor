@@ -7,9 +7,8 @@ import { installMockFetch, ok } from "@/test/mock-api";
 function bootstrapRoutes(overrides?: Partial<Record<string, unknown>>) {
   return [
     { method: "GET", path: "/users/me", handler: () => ok(overrides?.me ?? { email: "user@example.com", is_active: true, is_superuser: false, is_verified: true, created_at: "2026-04-01T10:00:00Z" }) },
-    { method: "GET", path: "/experiments", handler: () => ok(overrides?.experiments ?? []) },
-    { method: "GET", path: "/datasets", handler: () => ok(overrides?.datasets ?? []) },
-    { method: "GET", path: "/repositories", handler: () => ok(overrides?.repositories ?? []) },
+    { method: "GET", path: "/overview/summary", handler: () => ok(overrides?.summary ?? { experiment_count: 0, dataset_count: 0, repository_count: 0, deployment_count: 0 }) },
+    { method: "GET", path: "/overview/recent", handler: () => ok(overrides?.recent ?? { experiments: [], datasets: [], repositories: [], deployments: [] }) },
   ];
 }
 
@@ -29,9 +28,8 @@ describe("overview page", () => {
     writeToken("header.payload.signature");
     installMockFetch([
       { method: "GET", path: "/users/me", handler: () => ok({ email: "user@example.com", is_active: true, is_superuser: false, is_verified: true, created_at: "2026-04-01T10:00:00Z" }) },
-      { method: "GET", path: "/experiments", handler: () => ({ status: 500, body: { detail: "Boom" } }) },
-      { method: "GET", path: "/datasets", handler: () => ok([]) },
-      { method: "GET", path: "/repositories", handler: () => ok([]) },
+      { method: "GET", path: "/overview/summary", handler: () => ({ status: 500, body: { detail: "Boom" } }) },
+      { method: "GET", path: "/overview/recent", handler: () => ok({ experiments: [], datasets: [], repositories: [], deployments: [] }) },
     ]);
 
     renderApp("/overview");

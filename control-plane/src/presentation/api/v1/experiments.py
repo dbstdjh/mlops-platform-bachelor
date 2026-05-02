@@ -23,6 +23,8 @@ from src.core.entities.experiment_tracking import (
     RunStepBatchCreate,
 )
 from src.core.entities.dashboard import RunDashboardCreate, RunDashboardResponse, RunDashboardUpdate
+from src.core.entities.pagination import PaginatedResponse, SortDirection
+from src.presentation.api.v1.pagination import LimitQuery, OffsetQuery, SearchQuery
 from src.presentation.dependencies import get_current_user_id, get_experiment_tracking_service
 
 router = APIRouter()
@@ -38,12 +40,27 @@ async def create_experiment(
     return await service.create_experiment(user_id, data)
 
 
-@router.get("/experiments", response_model=list[ExperimentResponse])
+@router.get("/experiments", response_model=list[ExperimentResponse] | PaginatedResponse[ExperimentResponse])
 async def list_experiments(
+    paginated: bool = False,
+    search: SearchQuery = None,
+    sort_by: str = "created_at",
+    sort_dir: SortDirection = "desc",
+    limit: LimitQuery = 25,
+    offset: OffsetQuery = 0,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
 ):
     """List experiments for the current user."""
+    if paginated:
+        return await service.list_experiments_page(
+            user_id,
+            search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=limit,
+            offset=offset,
+        )
     return await service.list_experiments(user_id)
 
 
@@ -74,14 +91,30 @@ async def start_run(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/experiments/{experiment_slug}/runs", response_model=list[RunResponse])
+@router.get("/experiments/{experiment_slug}/runs", response_model=list[RunResponse] | PaginatedResponse[RunResponse])
 async def list_runs(
     experiment_slug: str,
+    paginated: bool = False,
+    search: SearchQuery = None,
+    sort_by: str = "run_number",
+    sort_dir: SortDirection = "desc",
+    limit: LimitQuery = 25,
+    offset: OffsetQuery = 0,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: ExperimentTrackingService = Depends(get_experiment_tracking_service),
 ):
     """List runs in an experiment."""
     try:
+        if paginated:
+            return await service.list_runs_page(
+                user_id,
+                experiment_slug,
+                search=search,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+                limit=limit,
+                offset=offset,
+            )
         return await service.list_runs(user_id, experiment_slug)
     except ExperimentTrackingNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

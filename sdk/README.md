@@ -63,6 +63,8 @@ Each script creates unique dataset, experiment, and repository names, so you can
   Logs a long run history with `run.log_batch(...)`, many steps, and explicit timestamps to exercise the step-history UI.
 - `examples/detached_model_workflows.py`
   Demonstrates finishing a run without logging a model inside the run, then uploading one model linked afterward and another model with no run attached at all.
+- `examples/deploy_pickle_model.py`
+  Runs an end-to-end Iris flow: fetches the dataset, uploads it as Parquet, downloads and loads it again, trains with metric logging, uploads a `.pkl` model, deploys it, prints the endpoint URL, and prints a starter `curl` request.
 
 ## Suggested UI Walkthrough
 

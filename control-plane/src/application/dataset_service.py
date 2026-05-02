@@ -14,6 +14,7 @@ from src.core.entities.dataset import (
     DatasetResponse,
     DatasetUploadResponse,
 )
+from src.core.entities.pagination import PaginatedResponse, SortDirection, page_items
 from src.core.entities.resource import Resource
 from src.core.ports.repositories import DatasetRepo, ResourceRepository
 from src.core.slugging import slug_candidate, slugify
@@ -139,6 +140,40 @@ class DatasetService:
         for dataset in datasets:
             responses.append(await self._build_dataset_response(dataset))
         return responses
+
+    async def list_datasets_page(
+        self,
+        user_id: uuid.UUID,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> PaginatedResponse[DatasetResponse]:
+        """List datasets with dashboard-oriented filtering and pagination."""
+        return page_items(
+            await self.list_datasets(user_id),
+            search=search,
+            search_fields=[
+                lambda item: item.name,
+                lambda item: item.slug,
+                lambda item: item.status,
+                lambda item: item.file_type,
+                lambda item: item.version,
+            ],
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            sort_fields={
+                "name": lambda item: item.name,
+                "slug": lambda item: item.slug,
+                "status": lambda item: item.status,
+                "version": lambda item: item.version,
+                "created_at": lambda item: item.created_at,
+            },
+            limit=limit,
+            offset=offset,
+        )
 
     async def _build_dataset_response(self, dataset: Dataset) -> DatasetResponse:
         resource = await self._resource_repo.get_by_id(dataset.resource_id)

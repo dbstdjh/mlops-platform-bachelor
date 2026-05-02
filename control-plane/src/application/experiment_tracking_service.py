@@ -28,6 +28,7 @@ from src.core.entities.experiment_tracking import (
     RunStepBatchCreate,
     RunSummaryResponse,
 )
+from src.core.entities.pagination import PaginatedResponse, SortDirection, page_items
 from src.core.entities.resource import Resource
 from src.core.ports.observability import GrafanaDashboardClient
 from src.core.ports.repositories import (
@@ -102,6 +103,38 @@ class ExperimentTrackingService:
         experiments = await self._experiment_repo.list_by_user(user_id)
         return [await self._build_experiment_response(experiment) for experiment in experiments]
 
+    async def list_experiments_page(
+        self,
+        user_id: uuid.UUID,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> PaginatedResponse[ExperimentResponse]:
+        """List experiments with dashboard-oriented filtering and pagination."""
+        return page_items(
+            await self.list_experiments(user_id),
+            search=search,
+            search_fields=[
+                lambda item: item.name,
+                lambda item: item.slug,
+                lambda item: " ".join(item.logged_data_template),
+                lambda item: item.latest_run.status if item.latest_run else "",
+            ],
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            sort_fields={
+                "name": lambda item: item.name,
+                "slug": lambda item: item.slug,
+                "run_count": lambda item: item.run_count,
+                "created_at": lambda item: item.created_at,
+            },
+            limit=limit,
+            offset=offset,
+        )
+
     async def get_experiment(self, user_id: uuid.UUID, experiment_slug: str) -> ExperimentResponse | None:
         experiment = await self._experiment_repo.get_by_slug(user_id, experiment_slug)
         if not experiment:
@@ -130,6 +163,39 @@ class ExperimentTrackingService:
         experiment = await self._get_experiment_or_raise(user_id, experiment_slug)
         runs = await self._run_repo.list_by_experiment(experiment.id)
         return [await self._build_run_response(experiment, run) for run in runs]
+
+    async def list_runs_page(
+        self,
+        user_id: uuid.UUID,
+        experiment_slug: str,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> PaginatedResponse[RunResponse]:
+        """List runs with dashboard-oriented filtering and pagination."""
+        return page_items(
+            await self.list_runs(user_id, experiment_slug),
+            search=search,
+            search_fields=[
+                lambda item: item.run_number,
+                lambda item: item.status,
+                lambda item: item.dataset.dataset_slug if item.dataset else "",
+                lambda item: item.model.repository_slug if item.model else "",
+            ],
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            sort_fields={
+                "run_number": lambda item: item.run_number,
+                "status": lambda item: item.status,
+                "created_at": lambda item: item.created_at,
+                "ended_at": lambda item: item.ended_at,
+            },
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_run(self, user_id: uuid.UUID, experiment_slug: str, run_number: int) -> RunResponse | None:
         experiment = await self._experiment_repo.get_by_slug(user_id, experiment_slug)

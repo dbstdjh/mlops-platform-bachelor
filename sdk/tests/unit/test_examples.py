@@ -18,6 +18,7 @@ EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "examples"
         "dense_metrics_per_step.py",
         "long_history_batched_steps.py",
         "detached_model_workflows.py",
+        "deploy_pickle_model.py",
     ],
 )
 def test_example_modules_import_without_running(file_name: str):

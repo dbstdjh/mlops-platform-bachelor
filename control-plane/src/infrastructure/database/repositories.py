@@ -13,8 +13,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.api_key import ApiKey
-from src.core.entities.dashboard import Dashboard, RunDashboardRecord
+from src.core.entities.dashboard import Dashboard, DeploymentDashboardRecord, RunDashboardRecord
 from src.core.entities.dataset import Dataset
+from src.core.entities.deployment import Deployment, DeploymentTask, FileDeployment, ImageDeployment
+from src.core.entities.artifact_registry import FeatureConfig
+from src.core.ports.artifact_registry import FeatureConfigRepo
 from src.core.entities.experiment_tracking import Experiment, Run, RunStep
 from src.core.entities.model import Model
 from src.core.entities.model_repository import ModelRepository
@@ -23,6 +26,8 @@ from src.core.ports.repositories import (
     ApiKeyRepo,
     DashboardRepo,
     DatasetRepo,
+    DeploymentRepo,
+    DeploymentTaskRepo,
     ExperimentRepo,
     ModelRepo,
     ModelRepositoryRepo,
@@ -35,8 +40,15 @@ from src.infrastructure.database.models import (
     DashboardORM,
     DatasetORM,
     DatasetStatusORM,
+    DeploymentORM,
+    DeploymentDashboardORM,
+    DeploymentStatusORM,
+    DeploymentTaskORM,
     ExperimentORM,
+    FeatureORM,
+    FileDeploymentORM,
     FileTypeORM,
+    ImageDeploymentORM,
     ModelORM,
     ModelRepositoryORM,
     ModelStatusORM,
@@ -45,6 +57,7 @@ from src.infrastructure.database.models import (
     RunDashboardORM,
     RunStatusORM,
     RunStepORM,
+    UserFeatureConfigORM,
 )
 
 
@@ -125,7 +138,7 @@ class SqlAlchemyApiKeyRepo(ApiKeyRepo):
 
 
 class SqlAlchemyDashboardRepo(DashboardRepo):
-    """SQLAlchemy adapter for saved run dashboard persistence."""
+    """SQLAlchemy adapter for saved dashboard persistence."""
 
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -208,6 +221,70 @@ class SqlAlchemyDashboardRepo(DashboardRepo):
         await self._session.flush()
         return True
 
+    async def create_deployment_dashboard(
+        self,
+        dashboard: Dashboard,
+        *,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentDashboardRecord:
+        dashboard_orm = DashboardORM(
+            id=dashboard.id,
+            name=dashboard.name,
+            kind=dashboard.kind,
+            grafana_uid=dashboard.grafana_uid,
+            is_system_locked=dashboard.is_system_locked,
+            config_data=dashboard.config_data,
+            created_at=dashboard.created_at,
+        )
+        deployment_dashboard_orm = DeploymentDashboardORM(id=dashboard.id, deployment_id=deployment_id)
+        self._session.add(dashboard_orm)
+        self._session.add(deployment_dashboard_orm)
+        await self._session.flush()
+        return self._to_deployment_record(dashboard_orm, deployment_dashboard_orm)
+
+    async def list_by_deployment(self, deployment_id: uuid.UUID) -> list[DeploymentDashboardRecord]:
+        stmt = (
+            select(DashboardORM, DeploymentDashboardORM)
+            .join(DeploymentDashboardORM, DeploymentDashboardORM.id == DashboardORM.id)
+            .where(DeploymentDashboardORM.deployment_id == deployment_id)
+            .order_by(DashboardORM.is_system_locked.desc(), DashboardORM.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [
+            self._to_deployment_record(dashboard, deployment_dashboard)
+            for dashboard, deployment_dashboard in result.all()
+        ]
+
+    async def get_by_id_for_deployment(
+        self,
+        deployment_id: uuid.UUID,
+        dashboard_id: uuid.UUID,
+    ) -> Optional[DeploymentDashboardRecord]:
+        stmt = (
+            select(DashboardORM, DeploymentDashboardORM)
+            .join(DeploymentDashboardORM, DeploymentDashboardORM.id == DashboardORM.id)
+            .where(
+                DeploymentDashboardORM.deployment_id == deployment_id,
+                DeploymentDashboardORM.id == dashboard_id,
+            )
+        )
+        result = await self._session.execute(stmt)
+        row = result.one_or_none()
+        if not row:
+            return None
+        return self._to_deployment_record(row[0], row[1])
+
+    async def delete_deployment_dashboard(self, deployment_id: uuid.UUID, dashboard_id: uuid.UUID) -> bool:
+        row = await self.get_by_id_for_deployment(deployment_id, dashboard_id)
+        if not row:
+            return False
+        dashboard_orm = await self._session.get(DashboardORM, dashboard_id)
+        if not dashboard_orm:
+            return False
+        await self._session.delete(dashboard_orm)
+        await self._session.flush()
+        return True
+
     async def _get_row(self, run_id: uuid.UUID, dashboard_id: uuid.UUID) -> tuple[DashboardORM, RunDashboardORM] | None:
         stmt = (
             select(DashboardORM, RunDashboardORM)
@@ -233,6 +310,302 @@ class SqlAlchemyDashboardRepo(DashboardRepo):
             grafana_uid=dashboard_orm.grafana_uid,
             created_at=dashboard_orm.created_at,
         )
+
+    def _to_deployment_record(
+        self,
+        dashboard_orm: DashboardORM,
+        deployment_dashboard_orm: DeploymentDashboardORM,
+    ) -> DeploymentDashboardRecord:
+        config_data = dashboard_orm.config_data or {}
+        return DeploymentDashboardRecord(
+            id=dashboard_orm.id,
+            deployment_id=deployment_dashboard_orm.deployment_id,
+            title=dashboard_orm.name,
+            plot_type=str(config_data.get("plot_type", "time_series")),
+            source=str(config_data.get("source", "system")),
+            field_path=config_data.get("field_path"),
+            is_system_locked=dashboard_orm.is_system_locked,
+            grafana_uid=dashboard_orm.grafana_uid,
+            created_at=dashboard_orm.created_at,
+        )
+
+
+class SqlAlchemyDeploymentRepo(DeploymentRepo):
+    """SQLAlchemy adapter for deployment persistence."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def _get_status_id(self, name: str) -> uuid.UUID:
+        stmt = select(DeploymentStatusORM.id).where(DeploymentStatusORM.name == name)
+        result = await self._session.execute(stmt)
+        status_id = result.scalar_one_or_none()
+        if status_id:
+            return status_id
+
+        insert_stmt = (
+            insert(DeploymentStatusORM)
+            .values(id=uuid.uuid4(), name=name)
+            .on_conflict_do_nothing(index_elements=[DeploymentStatusORM.name])
+        )
+        await self._session.execute(insert_stmt)
+        await self._session.flush()
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
+    async def create_file_deployment(
+        self,
+        deployment: Deployment,
+        file_deployment: FileDeployment,
+    ) -> Deployment:
+        status_id = await self._get_status_id(deployment.status)
+        orm = DeploymentORM(
+            id=deployment.id,
+            user_id=deployment.user_id,
+            resource_id=deployment.resource_id,
+            name=deployment.name,
+            slug=deployment.slug,
+            input_schema=deployment.input_schema,
+            output_schema=deployment.output_schema,
+            endpoint_url=deployment.endpoint_url,
+            k8s_namespace=deployment.k8s_namespace,
+            k8s_deployment_name=deployment.k8s_deployment_name,
+            k8s_service_name=deployment.k8s_service_name,
+            k8s_service_port=deployment.k8s_service_port,
+            status_id=status_id,
+            created_at=deployment.created_at,
+        )
+        file_orm = FileDeploymentORM(id=file_deployment.id, model_id=file_deployment.model_id)
+        self._session.add(orm)
+        self._session.add(file_orm)
+        await self._session.flush()
+        return deployment
+
+    async def create_image_deployment(
+        self,
+        deployment: Deployment,
+        image_deployment: ImageDeployment,
+    ) -> Deployment:
+        status_id = await self._get_status_id(deployment.status)
+        orm = DeploymentORM(
+            id=deployment.id,
+            user_id=deployment.user_id,
+            resource_id=deployment.resource_id,
+            name=deployment.name,
+            slug=deployment.slug,
+            input_schema=deployment.input_schema,
+            output_schema=deployment.output_schema,
+            endpoint_url=deployment.endpoint_url,
+            k8s_namespace=deployment.k8s_namespace,
+            k8s_deployment_name=deployment.k8s_deployment_name,
+            k8s_service_name=deployment.k8s_service_name,
+            k8s_service_port=deployment.k8s_service_port,
+            status_id=status_id,
+            created_at=deployment.created_at,
+        )
+        image_orm = ImageDeploymentORM(id=image_deployment.id, image_tag=image_deployment.image_tag)
+        self._session.add(orm)
+        self._session.add(image_orm)
+        await self._session.flush()
+        return deployment
+
+    async def get_image_ref(self, deployment_id: uuid.UUID) -> Optional[str]:
+        result = await self._session.execute(
+            select(ImageDeploymentORM.image_tag).where(ImageDeploymentORM.id == deployment_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_slug(self, user_id: uuid.UUID, slug: str) -> Optional[Deployment]:
+        stmt = select(DeploymentORM).where(
+            DeploymentORM.user_id == user_id,
+            DeploymentORM.slug == slug,
+        )
+        result = await self._session.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if not orm:
+            return None
+        return await self._to_entity(orm)
+
+    async def list_by_user(self, user_id: uuid.UUID) -> list[Deployment]:
+        stmt = (
+            select(DeploymentORM)
+            .where(DeploymentORM.user_id == user_id)
+            .order_by(DeploymentORM.created_at.desc())
+        )
+        result = await self._session.execute(stmt)
+        deployments = []
+        for orm in result.scalars().all():
+            deployments.append(await self._to_entity(orm))
+        return deployments
+
+    async def name_exists(self, user_id: uuid.UUID, name: str) -> bool:
+        stmt = select(DeploymentORM.id).where(
+            DeploymentORM.user_id == user_id,
+            DeploymentORM.name == name,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def slug_exists(self, user_id: uuid.UUID, slug: str) -> bool:
+        stmt = select(DeploymentORM.id).where(
+            DeploymentORM.user_id == user_id,
+            DeploymentORM.slug == slug,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def update_status(self, deployment_id: uuid.UUID, status: str) -> Optional[Deployment]:
+        orm = await self._session.get(DeploymentORM, deployment_id)
+        if not orm:
+            return None
+        orm.status_id = await self._get_status_id(status)
+        await self._session.flush()
+        return await self._to_entity(orm)
+
+    async def hard_delete(self, user_id: uuid.UUID, slug: str) -> bool:
+        stmt = select(DeploymentORM).where(
+            DeploymentORM.user_id == user_id,
+            DeploymentORM.slug == slug,
+        )
+        result = await self._session.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if not orm:
+            return False
+        await self._session.delete(orm)
+        await self._session.flush()
+        return True
+
+    async def _to_entity(self, orm: DeploymentORM) -> Deployment:
+        status_stmt = select(DeploymentStatusORM).where(DeploymentStatusORM.id == orm.status_id)
+        status_result = await self._session.execute(status_stmt)
+        status = status_result.scalar_one()
+        return Deployment(
+            id=orm.id,
+            user_id=orm.user_id,
+            resource_id=orm.resource_id,
+            name=orm.name,
+            slug=orm.slug,
+            input_schema=orm.input_schema,
+            output_schema=orm.output_schema,
+            endpoint_url=orm.endpoint_url,
+            k8s_namespace=orm.k8s_namespace,
+            k8s_deployment_name=orm.k8s_deployment_name,
+            k8s_service_name=orm.k8s_service_name,
+            k8s_service_port=orm.k8s_service_port,
+            status=status.name,
+            created_at=orm.created_at,
+        )
+
+
+class SqlAlchemyDeploymentTaskRepo(DeploymentTaskRepo):
+    """SQLAlchemy adapter for deployment task persistence."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def create(self, task: DeploymentTask) -> DeploymentTask:
+        orm = DeploymentTaskORM(
+            id=task.id,
+            deployment_id=task.deployment_id,
+            type=task.type,
+            status=task.status,
+            created_at=task.created_at,
+            claimed_at=task.claimed_at,
+            completed_at=task.completed_at,
+            error_message=task.error_message,
+        )
+        self._session.add(orm)
+        await self._session.flush()
+        return task
+
+
+class SqlAlchemyFeatureConfigRepo(FeatureConfigRepo):
+    """SQLAlchemy adapter for feature flags and per-user config."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def ensure_feature(self, name: str, description: str) -> None:
+        stmt = (
+            insert(FeatureORM)
+            .values(id=uuid.uuid4(), name=name, description=description, is_globally_enabled=True)
+            .on_conflict_do_nothing(index_elements=[FeatureORM.name])
+        )
+        await self._session.execute(stmt)
+        await self._session.flush()
+
+    async def get_user_config(self, user_id: uuid.UUID, feature_name: str) -> Optional[FeatureConfig]:
+        row = await self._get_row(user_id, feature_name)
+        if not row:
+            feature = await self._get_feature(feature_name)
+            if not feature:
+                return None
+            return FeatureConfig(
+                name=feature.name,
+                is_globally_enabled=feature.is_globally_enabled,
+                is_active=False,
+                config_data={},
+            )
+        feature, config = row
+        return FeatureConfig(
+            name=feature.name,
+            is_globally_enabled=feature.is_globally_enabled,
+            is_active=config.is_active,
+            config_data=config.config_data or {},
+        )
+
+    async def upsert_user_config(
+        self,
+        user_id: uuid.UUID,
+        feature_name: str,
+        *,
+        is_active: bool,
+        config_data: dict,
+    ) -> FeatureConfig:
+        feature = await self._get_feature(feature_name)
+        if not feature:
+            raise ValueError(f"Feature '{feature_name}' not found")
+
+        stmt = (
+            insert(UserFeatureConfigORM)
+            .values(
+                feature_id=feature.id,
+                user_id=user_id,
+                is_active=is_active,
+                config_data=config_data,
+            )
+            .on_conflict_do_update(
+                index_elements=[UserFeatureConfigORM.feature_id, UserFeatureConfigORM.user_id],
+                set_={"is_active": is_active, "config_data": config_data},
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.flush()
+        return FeatureConfig(
+            name=feature.name,
+            is_globally_enabled=feature.is_globally_enabled,
+            is_active=is_active,
+            config_data=config_data,
+        )
+
+    async def _get_feature(self, feature_name: str) -> FeatureORM | None:
+        result = await self._session.execute(select(FeatureORM).where(FeatureORM.name == feature_name))
+        return result.scalar_one_or_none()
+
+    async def _get_row(
+        self,
+        user_id: uuid.UUID,
+        feature_name: str,
+    ) -> tuple[FeatureORM, UserFeatureConfigORM] | None:
+        result = await self._session.execute(
+            select(FeatureORM, UserFeatureConfigORM)
+            .join(UserFeatureConfigORM, UserFeatureConfigORM.feature_id == FeatureORM.id, isouter=True)
+            .where(
+                FeatureORM.name == feature_name,
+                UserFeatureConfigORM.user_id == user_id,
+            )
+        )
+        return result.one_or_none()
 
 
 class SqlAlchemyResourceRepository(ResourceRepository):

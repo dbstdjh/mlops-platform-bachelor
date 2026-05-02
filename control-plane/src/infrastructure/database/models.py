@@ -256,14 +256,21 @@ class DeploymentORM(Base):
     __tablename__ = "deployment"
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="UQ_deployment_user_name"),
+        UniqueConstraint("user_id", "slug", name="UQ_deployment_user_slug"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
     resource_id = Column(UUID(as_uuid=True), ForeignKey("resource.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
+    slug = Column(String, nullable=False)
     input_schema = Column(JSONB, nullable=True)
     output_schema = Column(JSONB, nullable=True)
+    endpoint_url = Column(String, nullable=True)
+    k8s_namespace = Column(String, nullable=True)
+    k8s_deployment_name = Column(String, nullable=True)
+    k8s_service_name = Column(String, nullable=True)
+    k8s_service_port = Column(Integer, nullable=True)
     status_id = Column(UUID(as_uuid=True), ForeignKey("deployment_status.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 

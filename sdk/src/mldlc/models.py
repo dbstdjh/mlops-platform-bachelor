@@ -79,3 +79,48 @@ class ModelVersion(SDKModel):
     file_type: str
     created_at: datetime
     labels: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeploymentInfo(SDKModel):
+    name: str
+    slug: str
+    status: str
+    endpoint_url: str | None = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    created_at: datetime
+    labels: dict[str, Any] = Field(default_factory=dict)
+    source_type: str = "file"
+    image_ref: str | None = None
+
+
+class ArtifactRegistryStatus(SDKModel):
+    enabled: bool
+    registry_host: str
+    username: str | None = None
+    namespace: str | None = None
+    docker_login_command: str | None = None
+
+
+class RegistryTokenInfo(SDKModel):
+    name: str
+    token_last_eight: str | None = None
+    created_at: datetime | None = None
+
+
+class IssuedRegistryToken(RegistryTokenInfo):
+    token: str
+    registry_host: str
+    username: str
+    docker_login_command: str
+
+
+class ArtifactImageTag(SDKModel):
+    tag: str
+    image_ref: str
+    created_at: datetime | None = None
+
+
+class ArtifactImage(SDKModel):
+    name: str
+    tags: list[ArtifactImageTag] = Field(default_factory=list)

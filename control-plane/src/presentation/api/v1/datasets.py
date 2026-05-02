@@ -13,7 +13,9 @@ from src.core.entities.dataset import (
     DatasetResponse,
     DatasetUploadResponse,
 )
+from src.core.entities.pagination import PaginatedResponse, SortDirection
 from src.presentation.dependencies import get_dataset_service, get_current_user_id
+from src.presentation.api.v1.pagination import LimitQuery, OffsetQuery, SearchQuery
 
 router = APIRouter()
 
@@ -94,10 +96,25 @@ async def get_dataset(
     return result
 
 
-@router.get("/datasets", response_model=list[DatasetResponse])
+@router.get("/datasets", response_model=list[DatasetResponse] | PaginatedResponse[DatasetResponse])
 async def list_datasets(
+    paginated: bool = False,
+    search: SearchQuery = None,
+    sort_by: str = "created_at",
+    sort_dir: SortDirection = "desc",
+    limit: LimitQuery = 25,
+    offset: OffsetQuery = 0,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: DatasetService = Depends(get_dataset_service),
 ):
     """List all datasets for the current user."""
+    if paginated:
+        return await service.list_datasets_page(
+            user_id,
+            search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=limit,
+            offset=offset,
+        )
     return await service.list_datasets(user_id)

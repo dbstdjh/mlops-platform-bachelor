@@ -24,6 +24,101 @@ export interface IssuedApiKey extends ApiKey {
   api_key: string;
 }
 
+export interface ArtifactRegistryStatus {
+  enabled: boolean;
+  registry_host: string;
+  username: string | null;
+  namespace: string | null;
+  docker_login_command: string | null;
+}
+
+export interface RegistryToken {
+  name: string;
+  token_last_eight: string | null;
+  created_at: string | null;
+}
+
+export interface IssuedRegistryToken extends RegistryToken {
+  token: string;
+  registry_host: string;
+  username: string;
+  docker_login_command: string;
+}
+
+export interface ArtifactImageTag {
+  tag: string;
+  image_ref: string;
+  created_at: string | null;
+}
+
+export interface ArtifactImage {
+  name: string;
+  tags: ArtifactImageTag[];
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  search: string | null;
+  sort_by: string;
+  sort_dir: "asc" | "desc";
+}
+
+export interface ListQuery {
+  search?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export type DeploymentSourceType = "file" | "image";
+
+export interface Deployment {
+  name: string;
+  slug: string;
+  status: string;
+  endpoint_url: string | null;
+  input_schema: Record<string, unknown> | null;
+  output_schema: Record<string, unknown> | null;
+  created_at: string;
+  labels: Labels;
+  source_type: DeploymentSourceType;
+  image_ref: string | null;
+}
+
+export type DeploymentPlotType = "time_series" | "distribution" | "category_time_series";
+export type DeploymentPlotSource = "input" | "output";
+export type DeploymentPlotValueType =
+  | "number"
+  | "number_array"
+  | "number_matrix"
+  | "number_matrix_index"
+  | "category"
+  | "category_array"
+  | "boolean"
+  | "boolean_array";
+
+export interface DeploymentDashboard {
+  id: string;
+  title: string;
+  plot_type: string;
+  source: string;
+  field_path: string | null;
+  is_system_locked: boolean;
+  iframe_url: string;
+  created_at: string;
+}
+
+export interface DeploymentPlotField {
+  source: DeploymentPlotSource;
+  path: string;
+  value_type: DeploymentPlotValueType;
+  plot_types: DeploymentPlotType[];
+}
+
 export interface DatasetRef {
   dataset_slug: string;
   version: number;
@@ -131,6 +226,21 @@ export interface Model {
   is_deleted: boolean;
   s3_uri: string | null;
   status: string;
+  file_type: "pickle" | "undefined";
   created_at: string;
   labels: Labels;
+}
+
+export interface OverviewSummary {
+  experiment_count: number;
+  dataset_count: number;
+  repository_count: number;
+  deployment_count: number;
+}
+
+export interface OverviewRecent {
+  experiments: Experiment[];
+  datasets: Dataset[];
+  repositories: Repository[];
+  deployments: Deployment[];
 }

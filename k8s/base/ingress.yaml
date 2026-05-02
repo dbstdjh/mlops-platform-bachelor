@@ -3,6 +3,9 @@ kind: Ingress
 metadata:
   name: platform
   namespace: mldlc
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
 spec:
   ingressClassName: nginx
   rules:
@@ -26,6 +29,16 @@ spec:
                 name: api
                 port:
                   number: 8000
+    - host: gateway.mldlc.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge-gateway
+                port:
+                  number: 8080
     - host: minio.mldlc.local
       http:
         paths:

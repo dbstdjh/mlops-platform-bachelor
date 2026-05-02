@@ -1,15 +1,15 @@
 # Edge API Gateway (Go)
 
-The Edge API Gateway is a single Go application that acts as the primary entry point for all model inference traffic. It runs locally alongside the Control Plane API, intercepting requests before they reach the deployed model containers in Minikube.
+The Edge API Gateway is a single Go application that acts as the primary entry point for all model inference traffic. It runs as one Kubernetes Deployment inside the `mldlc` namespace and intercepts requests before they reach deployed model containers.
 
 ## Why It Exists
 
 The original architecture considered deploying the API Gateway as a **sidecar** inside every Minikube pod. This was abandoned due to severe networking complexities — Docker-to-Minikube routing loops, CORS challenges, and internal IP resolution issues.
 
-The **Edge Gateway Pattern** replaces the sidecar with a single gateway running outside the cluster:
-- All inference traffic routes to `localhost:8080` (the Go gateway).
+The **Edge Gateway Pattern** replaces the sidecar with a single in-cluster gateway:
+- All inference traffic routes to `http://gateway.mldlc.local/api/v1/deployments/{deployment_slug}:predict`.
 - The gateway handles authentication, logging, validation, and proxying in one place.
-- Zero Kubernetes networking configuration is required.
+- Model services remain internal `ClusterIP` services and are reached through Kubernetes DNS.
 
 ## Request Flow
 
@@ -17,11 +17,11 @@ The **Edge Gateway Pattern** replaces the sidecar with a single gateway running 
 SDK / React UI
       │
       ▼
-  Go Gateway (localhost:8080)
+  Go Gateway (gateway.mldlc.local)
       │
       ├── 1. JWT Validation
       ├── 2. Input Schema Validation
-      ├── 3. Proxy to Minikube IP
+      ├── 3. Proxy to model Service DNS
       ├── 4. Receive Response
       └── 5. Log Request + Response to PostgreSQL
 ```
@@ -46,7 +46,13 @@ For each inference request:
 
 ## Proxy Routing to Minikube
 
-After authentication and validation, the gateway proxies the request directly to the model container's internal Minikube IP and port. The gateway maintains a mapping of `deployment_id` → `minikube_endpoint` sourced from the Control Plane.
+After authentication and validation, the gateway proxies the request to the model Service through Kubernetes DNS:
+
+```text
+http://{k8s_service_name}.{k8s_namespace}.svc.cluster.local:{k8s_service_port}/predict
+```
+
+The gateway resolves this target from the `deployment` row for the authenticated user and deployment slug. Public APIs expose the gateway `endpoint_url`; direct model Service URLs are internal implementation details.
 
 ## Request/Response Logging
 
@@ -66,6 +72,6 @@ This logging serves two purposes:
 
 ## Connection Architecture
 
-- **Single instance:** One Go process handles all inference traffic.
+- **Single instance:** One Go Deployment handles all inference traffic.
 - **Single database pool:** The gateway maintains one PostgreSQL connection pool for logging, avoiding per-pod connection overhead.
-- **Local networking:** Both the gateway and the Control Plane run on the host machine. The gateway proxies to Minikube via its exposed IP.
+- **Cluster networking:** The gateway runs in Kubernetes and proxies to internal model `ClusterIP` Services through service DNS.

@@ -15,6 +15,7 @@ from src.core.entities.model_repository import (
     ModelRepositoryCreate,
     ModelRepositoryResponse,
 )
+from src.core.entities.pagination import PaginatedResponse, SortDirection, page_items
 from src.core.entities.resource import Resource
 from src.core.ports.repositories import (
     ExperimentRepo,
@@ -82,6 +83,37 @@ class ModelRegistryService:
             responses.append(await self._build_repository_response(repo))
         return responses
 
+    async def list_repositories_page(
+        self,
+        user_id: uuid.UUID,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> PaginatedResponse[ModelRepositoryResponse]:
+        """List model repositories with dashboard-oriented filtering and pagination."""
+        return page_items(
+            await self.list_repositories(user_id),
+            search=search,
+            search_fields=[
+                lambda item: item.name,
+                lambda item: item.slug,
+                lambda item: "deleted" if item.is_deleted else "active",
+            ],
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            sort_fields={
+                "name": lambda item: item.name,
+                "slug": lambda item: item.slug,
+                "status": lambda item: item.is_deleted,
+                "created_at": lambda item: item.created_at,
+            },
+            limit=limit,
+            offset=offset,
+        )
+
     async def delete_repository(self, user_id: uuid.UUID, repo_slug: str) -> bool:
         """Soft-delete a model repository."""
         return await self._model_repo_repo.soft_delete(user_id, repo_slug)
@@ -134,6 +166,40 @@ class ModelRegistryService:
         for model in models:
             responses.append(await self._build_model_response(model, repo))
         return responses
+
+    async def list_models_page(
+        self,
+        user_id: uuid.UUID,
+        repo_slug: str,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> PaginatedResponse[ModelResponse]:
+        """List model versions with dashboard-oriented filtering and pagination."""
+        return page_items(
+            await self.list_models(user_id, repo_slug),
+            search=search,
+            search_fields=[
+                lambda item: item.name,
+                lambda item: item.version,
+                lambda item: item.status,
+                lambda item: item.file_type,
+            ],
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            sort_fields={
+                "name": lambda item: item.name,
+                "version": lambda item: item.version,
+                "status": lambda item: item.status,
+                "file_type": lambda item: item.file_type,
+                "created_at": lambda item: item.created_at,
+            },
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_upload_url(
         self,

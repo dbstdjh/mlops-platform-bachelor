@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 import pandas as pd
@@ -23,10 +23,15 @@ from mldlc.errors import (
     ValidationError,
 )
 from mldlc.models import (
+    ArtifactImage,
+    ArtifactRegistryStatus,
     DatasetVersion,
+    DeploymentInfo,
     ExperimentInfo,
+    IssuedRegistryToken,
     ModelRepositoryInfo,
     ModelVersion,
+    RegistryTokenInfo,
     RunInfo,
     RunRef,
 )
@@ -91,8 +96,16 @@ class MLDLC:
         ):
             self._artifact_client.close()
 
+    def access_token(self) -> str:
+        """Return a valid bearer token for direct calls to gateway-hosted endpoints."""
+        self._authenticate()
+        return self._access_token or ""
+
     def _url(self, path: str) -> str:
         return f"{self._api_url}{path}"
+
+    def _path_part(self, value: str | int) -> str:
+        return quote(str(value), safe="")
 
     def _authenticate(self, *, force_refresh: bool = False) -> None:
         if self._access_token is not None and not force_refresh:
@@ -238,7 +251,7 @@ class MLDLC:
         return [self._model_from_json(ExperimentInfo, item) for item in payload]
 
     def get_experiment(self, experiment_slug: str) -> ExperimentInfo:
-        payload = self._get_json("GET", f"/experiments/{experiment_slug}")
+        payload = self._get_json("GET", f"/experiments/{self._path_part(experiment_slug)}")
         return self._model_from_json(ExperimentInfo, payload)
 
     def start_run(self, experiment_slug: str, *, dataset=None, labels: dict[str, Any] | None = None) -> RunContext:
@@ -248,7 +261,7 @@ class MLDLC:
         dataset_slug, dataset_version = self._normalize_dataset_ref(dataset)
         payload = self._get_json(
             "POST",
-            f"/experiments/{experiment_slug}/runs",
+            f"/experiments/{self._path_part(experiment_slug)}/runs",
             json={
                 "dataset_slug": dataset_slug,
                 "dataset_version": dataset_version,
@@ -258,11 +271,11 @@ class MLDLC:
         return self._model_from_json(RunInfo, payload)
 
     def list_runs(self, experiment_slug: str) -> list[RunInfo]:
-        payload = self._get_json("GET", f"/experiments/{experiment_slug}/runs")
+        payload = self._get_json("GET", f"/experiments/{self._path_part(experiment_slug)}/runs")
         return [self._model_from_json(RunInfo, item) for item in payload]
 
     def get_run(self, experiment_slug: str, run_number: int) -> RunInfo:
-        payload = self._get_json("GET", f"/experiments/{experiment_slug}/runs/{run_number}")
+        payload = self._get_json("GET", f"/experiments/{self._path_part(experiment_slug)}/runs/{self._path_part(run_number)}")
         return self._model_from_json(RunInfo, payload)
 
     def _append_run_steps(self, experiment_slug: str, run_number: int, items: list[dict[str, Any]]) -> None:
@@ -275,20 +288,20 @@ class MLDLC:
             normalized_items.append(step_payload)
         self._request(
             "POST",
-            f"/experiments/{experiment_slug}/runs/{run_number}/steps",
+            f"/experiments/{self._path_part(experiment_slug)}/runs/{self._path_part(run_number)}/steps",
             json={"items": normalized_items},
         )
 
     def _complete_run(self, experiment_slug: str, run_number: int) -> RunInfo:
-        payload = self._get_json("POST", f"/experiments/{experiment_slug}/runs/{run_number}:complete")
+        payload = self._get_json("POST", f"/experiments/{self._path_part(experiment_slug)}/runs/{self._path_part(run_number)}:complete")
         return self._model_from_json(RunInfo, payload)
 
     def _fail_run(self, experiment_slug: str, run_number: int) -> RunInfo:
-        payload = self._get_json("POST", f"/experiments/{experiment_slug}/runs/{run_number}:fail")
+        payload = self._get_json("POST", f"/experiments/{self._path_part(experiment_slug)}/runs/{self._path_part(run_number)}:fail")
         return self._model_from_json(RunInfo, payload)
 
     def get_run_metric_history(self, experiment_slug: str, run_number: int, metric_name: str) -> pd.DataFrame:
-        payload = self._get_json("GET", f"/experiments/{experiment_slug}/runs/{run_number}/plots/{metric_name}")
+        payload = self._get_json("GET", f"/experiments/{self._path_part(experiment_slug)}/runs/{self._path_part(run_number)}/plots/{self._path_part(metric_name)}")
         return pd.DataFrame(
             [
                 {
@@ -304,7 +317,7 @@ class MLDLC:
         )
 
     def get_experiment_metric_history(self, experiment_slug: str, metric_name: str) -> pd.DataFrame:
-        payload = self._get_json("GET", f"/experiments/{experiment_slug}/plots/{metric_name}")
+        payload = self._get_json("GET", f"/experiments/{self._path_part(experiment_slug)}/plots/{self._path_part(metric_name)}")
         rows = []
         for series in payload["series"]:
             for point in series["points"]:
@@ -325,7 +338,7 @@ class MLDLC:
         return [self._model_from_json(DatasetVersion, item) for item in payload]
 
     def get_dataset(self, dataset_slug: str, version: int) -> DatasetVersion:
-        payload = self._get_json("GET", f"/datasets/{dataset_slug}/versions/{version}")
+        payload = self._get_json("GET", f"/datasets/{self._path_part(dataset_slug)}/versions/{self._path_part(version)}")
         return self._model_from_json(DatasetVersion, payload)
 
     def _wait_for_dataset_ready(self, dataset_slug: str, version: int, timeout: float | None = None) -> DatasetVersion:
@@ -378,9 +391,9 @@ class MLDLC:
     ):
         metadata = self._resolve_latest_ready_dataset(dataset_slug) if version is None else self.get_dataset(dataset_slug, version)
         path = (
-            f"/datasets/{dataset_slug}:download"
+            f"/datasets/{self._path_part(dataset_slug)}:download"
             if version is None
-            else f"/datasets/{dataset_slug}/versions/{version}:download"
+            else f"/datasets/{self._path_part(dataset_slug)}/versions/{self._path_part(version)}:download"
         )
         payload = self._get_json("GET", path)
         content = self._download_from_signed_url(payload["download_url"])
@@ -395,18 +408,18 @@ class MLDLC:
         return [self._model_from_json(ModelRepositoryInfo, item) for item in payload]
 
     def get_repository(self, repository_slug: str) -> ModelRepositoryInfo:
-        payload = self._get_json("GET", f"/repositories/{repository_slug}")
+        payload = self._get_json("GET", f"/repositories/{self._path_part(repository_slug)}")
         return self._model_from_json(ModelRepositoryInfo, payload)
 
     def delete_repository(self, repository_slug: str) -> None:
-        self._request("DELETE", f"/repositories/{repository_slug}")
+        self._request("DELETE", f"/repositories/{self._path_part(repository_slug)}")
 
     def list_models(self, repository_slug: str) -> list[ModelVersion]:
-        payload = self._get_json("GET", f"/repositories/{repository_slug}/models")
+        payload = self._get_json("GET", f"/repositories/{self._path_part(repository_slug)}/models")
         return [self._model_from_json(ModelVersion, item) for item in payload]
 
     def get_model(self, repository_slug: str, version: str) -> ModelVersion:
-        payload = self._get_json("GET", f"/repositories/{repository_slug}/models/{version}")
+        payload = self._get_json("GET", f"/repositories/{self._path_part(repository_slug)}/models/{self._path_part(version)}")
         return self._model_from_json(ModelVersion, payload)
 
     def log_model(
@@ -432,7 +445,7 @@ class MLDLC:
         )
         self._request(
             "POST",
-            f"/repositories/{repository_slug}/models",
+            f"/repositories/{self._path_part(repository_slug)}/models",
             json={
                 "name": name,
                 "version": version,
@@ -442,11 +455,11 @@ class MLDLC:
         )
         upload = self._get_json(
             "POST",
-            f"/repositories/{repository_slug}/models/{version}:upload",
+            f"/repositories/{self._path_part(repository_slug)}/models/{self._path_part(version)}:upload",
             json={"file_name": upload_file_name},
         )
         self._upload_to_signed_url(upload["upload_url"], artifact_bytes)
-        self._request("POST", f"/repositories/{repository_slug}/models/{version}:confirm_upload")
+        self._request("POST", f"/repositories/{self._path_part(repository_slug)}/models/{self._path_part(version)}:confirm_upload")
         return self.get_model(repository_slug, version)
 
     def download_model(
@@ -457,7 +470,7 @@ class MLDLC:
         destination: str | Path | None = None,
         loader: Callable[[Path], Any] | None = None,
     ):
-        payload = self._get_json("GET", f"/repositories/{repository_slug}/models/{version}:download")
+        payload = self._get_json("GET", f"/repositories/{self._path_part(repository_slug)}/models/{self._path_part(version)}:download")
         content = self._download_from_signed_url(payload["download_url"])
         model = self.get_model(repository_slug, version)
         default_destination = destination
@@ -480,6 +493,98 @@ class MLDLC:
         if loader is not None:
             return loader(Path(default_destination))
         return Path(default_destination)
+
+    def deploy_model(
+        self,
+        repository_slug: str,
+        version: str,
+        name: str,
+        *,
+        input_schema: Any | None = None,
+        output_schema: Any | None = None,
+        labels: dict[str, Any] | None = None,
+    ) -> DeploymentInfo:
+        payload = self._get_json(
+            "POST",
+            f"/repositories/{self._path_part(repository_slug)}/models/{self._path_part(version)}/deployments",
+            json={
+                "name": name,
+                "input_schema": self._schema_payload(input_schema),
+                "output_schema": self._schema_payload(output_schema),
+                "labels": labels or {},
+            },
+        )
+        return self._model_from_json(DeploymentInfo, payload)
+
+    def list_deployments(self) -> list[DeploymentInfo]:
+        payload = self._get_json("GET", "/deployments")
+        return [self._model_from_json(DeploymentInfo, item) for item in payload]
+
+    def get_deployment(self, deployment_slug: str) -> DeploymentInfo:
+        payload = self._get_json("GET", f"/deployments/{self._path_part(deployment_slug)}")
+        return self._model_from_json(DeploymentInfo, payload)
+
+    def delete_deployment(self, deployment_slug: str) -> DeploymentInfo:
+        payload = self._get_json("DELETE", f"/deployments/{self._path_part(deployment_slug)}")
+        return self._model_from_json(DeploymentInfo, payload)
+
+    def get_artifact_registry_status(self) -> ArtifactRegistryStatus:
+        payload = self._get_json("GET", "/artifact-registry/status")
+        return self._model_from_json(ArtifactRegistryStatus, payload)
+
+    def enable_custom_deployments(self) -> ArtifactRegistryStatus:
+        payload = self._get_json("POST", "/artifact-registry:enable")
+        return self._model_from_json(ArtifactRegistryStatus, payload)
+
+    def list_registry_tokens(self) -> list[RegistryTokenInfo]:
+        payload = self._get_json("GET", "/artifact-registry/tokens")
+        return [self._model_from_json(RegistryTokenInfo, item) for item in payload]
+
+    def create_registry_token(self, name: str) -> IssuedRegistryToken:
+        payload = self._get_json("POST", "/artifact-registry/tokens", json={"name": name})
+        return self._model_from_json(IssuedRegistryToken, payload)
+
+    def revoke_registry_token(self, name: str) -> None:
+        self._request("POST", f"/artifact-registry/tokens/{self._path_part(name)}:revoke")
+
+    def list_custom_images(self) -> list[ArtifactImage]:
+        payload = self._get_json("GET", "/artifact-registry/images")
+        return [self._model_from_json(ArtifactImage, item) for item in payload]
+
+    def deploy_image(
+        self,
+        image_name: str,
+        tag: str,
+        name: str,
+        *,
+        input_schema: Any | None = None,
+        output_schema: Any | None = None,
+        labels: dict[str, Any] | None = None,
+    ) -> DeploymentInfo:
+        payload = self._get_json(
+            "POST",
+            f"/artifact-registry/images/{self._path_part(image_name)}/tags/{self._path_part(tag)}/deployments",
+            json={
+                "name": name,
+                "input_schema": self._schema_payload(input_schema),
+                "output_schema": self._schema_payload(output_schema),
+                "labels": labels or {},
+            },
+        )
+        return self._model_from_json(DeploymentInfo, payload)
+
+    @staticmethod
+    def _schema_payload(schema: Any | None) -> dict[str, Any] | None:
+        if schema is None:
+            return None
+        if isinstance(schema, dict):
+            return schema
+        schema_method = getattr(schema, "model_json_schema", None)
+        if callable(schema_method):
+            return schema_method()
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            return schema.model_json_schema()
+        raise SerializationError("schema must be a dict or Pydantic model class/instance")
 
     @staticmethod
     def _signed_url_object_key(signed_url: str, bucket: str) -> str:

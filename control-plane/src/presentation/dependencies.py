@@ -8,11 +8,14 @@ This is the ONLY place where infrastructure touches application — FastAPI's DI
 import uuid
 
 from fastapi import Depends
+import httpx
 from minio import Minio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.dataset_service import DatasetService
+from src.application.artifact_registry_service import ArtifactRegistryService, SecretCipher
 from src.application.api_key_service import ApiKeyService
+from src.application.deployment_service import DeploymentService
 from src.application.experiment_tracking_service import ExperimentTrackingService
 from src.application.model_registry_service import ModelRegistryService
 from src.config import Settings, get_settings
@@ -22,7 +25,10 @@ from src.infrastructure.database.repositories import (
     SqlAlchemyApiKeyRepo,
     SqlAlchemyDashboardRepo,
     SqlAlchemyDatasetRepo,
+    SqlAlchemyDeploymentRepo,
+    SqlAlchemyDeploymentTaskRepo,
     SqlAlchemyExperimentRepo,
+    SqlAlchemyFeatureConfigRepo,
     SqlAlchemyModelRepo,
     SqlAlchemyModelRepositoryRepo,
     SqlAlchemyResourceRepository,
@@ -30,6 +36,7 @@ from src.infrastructure.database.repositories import (
     SqlAlchemyRunStepRepo,
 )
 from src.infrastructure.database.models import UserORM
+from src.infrastructure.artifact_registry.gitea import HttpGiteaRegistryClient
 from src.infrastructure.observability.grafana import HttpGrafanaDashboardClient
 from src.infrastructure.storage.minio_adapter import MinioStorageAdapter
 
@@ -89,6 +96,39 @@ async def get_model_registry_service(
     )
 
 
+async def get_deployment_service(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DeploymentService:
+    """Wire up the DeploymentService with its repository dependencies."""
+    if not isinstance(settings, Settings):
+        settings = get_settings()
+
+    return DeploymentService(
+        deployment_repo=SqlAlchemyDeploymentRepo(session),
+        deployment_task_repo=SqlAlchemyDeploymentTaskRepo(session),
+        model_repo_repo=SqlAlchemyModelRepositoryRepo(session),
+        model_repo=SqlAlchemyModelRepo(session),
+        resource_repo=SqlAlchemyResourceRepository(session),
+        dashboard_repo=SqlAlchemyDashboardRepo(session),
+        grafana_client=HttpGrafanaDashboardClient.from_settings(
+            grafana_url=settings.grafana_url,
+            public_url=settings.grafana_public_url,
+            admin_token=settings.grafana_admin_token,
+            admin_user=settings.grafana_admin_user,
+            admin_password=settings.grafana_admin_password,
+            database_url=settings.database_url,
+            datasource_name=settings.grafana_datasource_name,
+            datasource_host=settings.grafana_datasource_host,
+            datasource_port=settings.grafana_datasource_port,
+            datasource_database=settings.grafana_datasource_database,
+            datasource_user=settings.grafana_datasource_user,
+            datasource_password=settings.grafana_datasource_password,
+            datasource_sslmode=settings.grafana_datasource_sslmode,
+        ),
+    )
+
+
 async def get_experiment_tracking_service(
     session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -131,6 +171,41 @@ async def get_api_key_service(
     """Wire up the ApiKeyService with its repository dependency."""
     return ApiKeyService(
         api_key_repo=SqlAlchemyApiKeyRepo(session),
+    )
+
+
+async def get_gitea_http_client():
+    """Provide a short-lived HTTP client for Gitea API calls."""
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        yield client
+
+
+def get_gitea_registry_client(
+    settings: Settings = Depends(get_settings),
+    http_client: httpx.AsyncClient = Depends(get_gitea_http_client),
+) -> HttpGiteaRegistryClient:
+    """Provide the Gitea registry adapter."""
+    return HttpGiteaRegistryClient(
+        base_url=settings.gitea_url,
+        admin_token=settings.gitea_admin_token,
+        http_client=http_client,
+    )
+
+
+async def get_artifact_registry_service(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    gitea_client: HttpGiteaRegistryClient = Depends(get_gitea_registry_client),
+) -> ArtifactRegistryService:
+    """Wire up the ArtifactRegistryService."""
+    return ArtifactRegistryService(
+        feature_repo=SqlAlchemyFeatureConfigRepo(session),
+        deployment_repo=SqlAlchemyDeploymentRepo(session),
+        deployment_task_repo=SqlAlchemyDeploymentTaskRepo(session),
+        resource_repo=SqlAlchemyResourceRepository(session),
+        gitea_client=gitea_client,
+        cipher=SecretCipher(settings.secret_key),
+        registry_public_url=settings.gitea_public_url,
     )
 
 

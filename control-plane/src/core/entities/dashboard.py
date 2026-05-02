@@ -10,7 +10,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 PlotType = Literal["line", "stat"]
-DashboardKind = Literal["RUN_PLOT"]
+DeploymentPlotType = Literal["time_series", "distribution", "category_time_series"]
+DeploymentPlotSource = Literal["input", "output"]
+DeploymentPlotValueType = Literal[
+    "number",
+    "number_array",
+    "number_matrix",
+    "number_matrix_index",
+    "category",
+    "category_array",
+    "boolean",
+    "boolean_array",
+]
+DashboardKind = Literal["RUN_PLOT", "DEPLOYMENT_PLOT"]
 
 
 class Dashboard(BaseModel):
@@ -135,3 +147,56 @@ class RunDashboardResponse(BaseModel):
     display_order: int
     iframe_url: str
     created_at: datetime
+
+
+class DeploymentDashboardRecord(BaseModel):
+    """Application-facing saved deployment observability panel."""
+
+    id: uuid.UUID
+    deployment_id: uuid.UUID
+    title: str
+    plot_type: DeploymentPlotType | Literal["latency", "status_code"]
+    source: DeploymentPlotSource | Literal["system"] = "system"
+    field_path: str | None = None
+    is_system_locked: bool = False
+    grafana_uid: str | None = None
+    created_at: datetime
+
+
+class DeploymentDashboardCreate(BaseModel):
+    """Request payload for creating a deployment observability panel."""
+
+    title: str = Field(min_length=1, max_length=120)
+    plot_type: DeploymentPlotType
+    source: DeploymentPlotSource
+    field_path: str = Field(min_length=1, max_length=240)
+
+    @field_validator("title", "field_path")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must not be empty")
+        return normalized
+
+
+class DeploymentDashboardResponse(BaseModel):
+    """Frontend-friendly deployment observability panel response."""
+
+    id: uuid.UUID
+    title: str
+    plot_type: str
+    source: str
+    field_path: str | None = None
+    is_system_locked: bool
+    iframe_url: str
+    created_at: datetime
+
+
+class DeploymentPlotField(BaseModel):
+    """A field available for custom deployment plots."""
+
+    source: DeploymentPlotSource
+    path: str
+    value_type: DeploymentPlotValueType
+    plot_types: list[DeploymentPlotType]

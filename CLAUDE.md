@@ -24,7 +24,8 @@ Phase 2 introduces Minikube/Kubernetes as the local platform runtime, followed b
 **Current infrastructure baseline:**
 - Kubernetes manifests live under `k8s/base/` and are managed with Kustomize.
 - Local namespace: `mldlc`
-- Local Ingress hosts: `dashboard.mldlc.local`, `api.mldlc.local`, `minio.mldlc.local`, `console.minio.mldlc.local`, `gitea.mldlc.local`, `grafana.mldlc.local`
+- Local Ingress hosts: `dashboard.mldlc.local`, `api.mldlc.local`, `gateway.mldlc.local`, `minio.mldlc.local`, `console.minio.mldlc.local`, `gitea.mldlc.local`, `grafana.mldlc.local`
+- Local Postgres is reachable through ingress-nginx TCP forwarding at `127.0.0.1:15432` when `minikube tunnel` is running.
 - Use Minikube plus the ingress addon and `minikube tunnel` for local access.
 
 ## Documentation
@@ -187,7 +188,7 @@ cp k8s/base/secret.example.env k8s/base/secret.env
 # Edit k8s/base/secret.env before first deploy.
 
 # Add these hosts to /etc/hosts, pointing at the Minikube tunnel IP:
-# dashboard.mldlc.local api.mldlc.local minio.mldlc.local
+# dashboard.mldlc.local api.mldlc.local gateway.mldlc.local minio.mldlc.local
 # console.minio.mldlc.local gitea.mldlc.local grafana.mldlc.local
 
 # Build local images and apply Kubernetes manifests.
@@ -198,3 +199,5 @@ make kube-status
 ```
 
 The dashboard is available at `http://dashboard.mldlc.local`. The API is available at `http://api.mldlc.local/api/v1`.
+The model inference gateway is available at `http://gateway.mldlc.local`.
+PostgreSQL is available through ingress TCP forwarding at `127.0.0.1:15432`.

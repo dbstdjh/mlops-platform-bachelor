@@ -18,9 +18,9 @@ The MLOps platform utilizes a distributed infrastructure stack designed to run l
 Deploying API Gateways as sidecars inside every Minikube pod introduces severe networking complexities, including Docker-to-Minikube routing loops and CORS challenges.
 
 To solve this, the platform utilizes an **Edge Gateway Pattern**:
-- A single Go-based API Gateway runs locally next to the Control Plane.
-- All inference traffic from the web UI or SDK is routed to this Gateway (`localhost:8080`).
-- The Gateway intercepts the request, validates the JWT, logs the payload to PostgreSQL (for observability and drift monitoring), and proxies the traffic directly to the internal Minikube IP of the target model container.
+- A single Go-based API Gateway runs inside the `mldlc` namespace.
+- All inference traffic from the web UI or SDK is routed to this Gateway (`gateway.mldlc.local`).
+- The Gateway intercepts the request, validates the JWT, logs the payload to PostgreSQL (for observability and drift monitoring), and proxies the traffic to the target model Service through Kubernetes DNS.
 
 ### 2. Large Data Handling & Storage
 To protect the Control Plane from Out-Of-Memory (OOM) crashes when handling multi-gigabyte datasets, all heavy data transfers bypass the API.

@@ -48,7 +48,7 @@ export function AccountPage() {
       <PageHeader
         eyebrow="Account"
         title="Profile and API keys"
-        description="This surface stays intentionally small: API keys and saved observability state are the only mutating dashboard workflows in Phase 1."
+        description="Identity details and SDK credentials for local workflows."
       />
 
       <Panel className="space-y-5">
@@ -126,6 +126,7 @@ export function AccountPage() {
           </div>
         )}
       </Panel>
+
     </div>
   );
 }

@@ -13,6 +13,8 @@ from src.core.entities.model_repository import (
     ModelRepositoryCreate,
     ModelRepositoryResponse,
 )
+from src.core.entities.pagination import PaginatedResponse, SortDirection
+from src.presentation.api.v1.pagination import LimitQuery, OffsetQuery, SearchQuery
 from src.presentation.dependencies import get_model_registry_service, get_current_user_id
 
 router = APIRouter()
@@ -30,12 +32,27 @@ async def create_repository(
     return await service.create_repository(user_id, data)
 
 
-@router.get("/repositories", response_model=list[ModelRepositoryResponse])
+@router.get("/repositories", response_model=list[ModelRepositoryResponse] | PaginatedResponse[ModelRepositoryResponse])
 async def list_repositories(
+    paginated: bool = False,
+    search: SearchQuery = None,
+    sort_by: str = "created_at",
+    sort_dir: SortDirection = "desc",
+    limit: LimitQuery = 25,
+    offset: OffsetQuery = 0,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ):
     """List all model repositories for the current user."""
+    if paginated:
+        return await service.list_repositories_page(
+            user_id,
+            search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=limit,
+            offset=offset,
+        )
     return await service.list_repositories(user_id)
 
 
@@ -80,14 +97,30 @@ async def create_model(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/repositories/{repository_slug}/models", response_model=list[ModelResponse])
+@router.get("/repositories/{repository_slug}/models", response_model=list[ModelResponse] | PaginatedResponse[ModelResponse])
 async def list_models(
     repository_slug: str,
+    paginated: bool = False,
+    search: SearchQuery = None,
+    sort_by: str = "created_at",
+    sort_dir: SortDirection = "desc",
+    limit: LimitQuery = 25,
+    offset: OffsetQuery = 0,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ):
     """List all model versions within a repository."""
     try:
+        if paginated:
+            return await service.list_models_page(
+                user_id,
+                repository_slug,
+                search=search,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+                limit=limit,
+                offset=offset,
+            )
         return await service.list_models(user_id, repository_slug)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

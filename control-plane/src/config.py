@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Gitea
     gitea_url: str = "http://localhost:3002"
+    gitea_public_url: str = "http://localhost:3002"
     gitea_admin_token: str = ""
 
     # Grafana

@@ -8,6 +8,7 @@ Deployments are initiated entirely through the Python SDK; the web dashboard is 
 - **Triggers:** A deployment request inserts a task into PostgreSQL. The Deployment Service is woken up instantly via PostgreSQL's `LISTEN/NOTIFY` mechanism.
 - **Execution:** The Deployment Service claims the task and provisions the model container.
 - **Environments:** Models can be deployed using prebuilt images (for `.pickle` or `.keras` files) or custom images defined in the Artifact Registry.
+- **Inference:** Public inference URLs point at the in-cluster Go Edge Gateway (`gateway.mldlc.local`). Model Services are internal `ClusterIP` Services reached by the gateway through Kubernetes DNS.
 - **Health Monitoring:** After deployment, the Deployment Service polls the Kubernetes API for pod health status and updates the deployment record. *(Note: While K8s health polling works for the PoC, it is flagged as an area for future architectural improvement).*
 
 ## Schema Validation

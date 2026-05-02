@@ -1,25 +1,22 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, SearchInput, StatusBadge } from "@/components/ui";
+import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, PaginationControls, SearchInput, SelectInput, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 
+const PAGE_SIZE = 12;
+
 export function ExperimentsPage() {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [offset, setOffset] = useState(0);
   const experimentsQuery = useQuery({
-    queryKey: ["experiments"],
-    queryFn: api.listExperiments,
+    queryKey: ["experiments", { search, sortBy, sortDir, offset }],
+    queryFn: () => api.listExperimentsPage({ search, sort_by: sortBy, sort_dir: sortDir, limit: PAGE_SIZE, offset }),
   });
-
-  const filteredExperiments = useMemo(() => {
-    const items = experimentsQuery.data ?? [];
-    return items.filter((experiment) => {
-      const haystack = `${experiment.name} ${experiment.slug}`.toLowerCase();
-      return haystack.includes(search.toLowerCase());
-    });
-  }, [experimentsQuery.data, search]);
 
   if (experimentsQuery.isLoading) {
     return <LoadingCard label="Loading experiments" />;
@@ -35,19 +32,38 @@ export function ExperimentsPage() {
         eyebrow="Experiment Tracking"
         title="Experiments"
         description="Search across experiment groups, inspect their declared metrics, and jump straight into runs and plots."
-        action={<div className="w-full max-w-sm"><SearchInput placeholder="Search by name or slug" value={search} onChange={setSearch} /></div>}
+        action={
+          <div className="grid w-full gap-3 md:max-w-2xl md:grid-cols-[minmax(0,1fr)_170px_175px]">
+            <SearchInput placeholder="Search by name, slug, or metric" value={search} onChange={(value) => { setSearch(value); setOffset(0); }} />
+            <SelectInput
+              onValueChange={(value) => { setSortBy(value); setOffset(0); }}
+              options={[
+                { value: "created_at", label: "Newest" },
+                { value: "name", label: "Name" },
+                { value: "run_count", label: "Runs" },
+              ]}
+              value={sortBy}
+            />
+            <SelectInput
+              onValueChange={(value) => { setSortDir(value as "asc" | "desc"); setOffset(0); }}
+              options={[
+                { value: "desc", label: "Descending" },
+                { value: "asc", label: "Ascending" },
+              ]}
+              value={sortDir}
+            />
+          </div>
+        }
       />
 
-      {filteredExperiments.length === 0 ? (
+      {experimentsQuery.data?.items.length === 0 ? (
         <EmptyState title="No experiments found" description="The current filter returned nothing. Clear the search or create activity through the SDK." />
       ) : (
-        <div className="grid gap-4">
-          {filteredExperiments.map((experiment) => (
-            <Link
-              key={experiment.slug}
-              className="block rounded-[28px] border border-border bg-mist/80 p-6 shadow-card transition hover:border-accent/40"
-              to={`/experiments/${experiment.slug}`}
-            >
+        <div className="space-y-4">
+          <PaginationControls total={experimentsQuery.data?.total ?? 0} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+          <div className="grid gap-4">
+          {experimentsQuery.data?.items.map((experiment) => (
+            <Link key={experiment.slug} className="block rounded-[28px] border border-border bg-mist/80 p-6 shadow-card transition hover:border-accent/40" to={`/experiments/${experiment.slug}`}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -79,6 +95,8 @@ export function ExperimentsPage() {
               </div>
             </Link>
           ))}
+          </div>
+          <PaginationControls total={experimentsQuery.data?.total ?? 0} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
         </div>
       )}
     </div>

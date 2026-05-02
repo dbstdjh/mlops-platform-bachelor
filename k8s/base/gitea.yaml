@@ -21,6 +21,8 @@ metadata:
   namespace: mldlc
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: gitea
@@ -47,10 +49,7 @@ spec:
             - name: GITEA__database__HOST
               value: db:5432
             - name: GITEA__database__NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: platform-config
-                  key: POSTGRES_DB
+              value: gitea
             - name: GITEA__database__USER
               valueFrom:
                 configMapKeyRef:
@@ -108,7 +107,9 @@ spec:
             - name: GITEA__packages__MINIO_USE_SSL
               value: "false"
             - name: GITEA__server__ROOT_URL
-              value: http://gitea.mldlc.local
+              value: http://gitea.mldlc.local:80
+            - name: GITEA__security__INSTALL_LOCK
+              value: "true"
             - name: GITEA__service__DISABLE_REGISTRATION
               value: "true"
           readinessProbe:

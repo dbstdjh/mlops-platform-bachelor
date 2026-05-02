@@ -105,6 +105,45 @@ test("dashboard smoke flow", async ({ page }) => {
     if (request.method() === "GET" && path === "/repositories/iris-models/models/1.0") {
       return json({ repository_slug: "iris-models", name: "Iris classifier", version: "1.0", run: { experiment_slug: "iris-exp", run_number: 1 }, is_deleted: false, s3_uri: null, status: "READY", created_at: "2026-04-01T10:00:00Z", labels: {} });
     }
+    if (request.method() === "GET" && path === "/deployments") {
+      return json([
+        {
+          name: "Iris serving",
+          slug: "iris-serving",
+          status: "ACTIVE",
+          endpoint_url: "http://gateway.mldlc.local/api/v1/deployments/iris-serving:predict",
+          input_schema: { type: "object", properties: { sepal_length: { type: "number" } } },
+          output_schema: { type: "object", properties: { score: { type: "number" } } },
+          created_at: "2026-04-01T10:00:00Z",
+          labels: {},
+          source_type: "image",
+          image_ref: "gitea.mldlc.local/user/iris:latest",
+        },
+      ]);
+    }
+    if (request.method() === "GET" && path === "/deployments/iris-serving") {
+      return json({
+        name: "Iris serving",
+        slug: "iris-serving",
+        status: "ACTIVE",
+        endpoint_url: "http://gateway.mldlc.local/api/v1/deployments/iris-serving:predict",
+        input_schema: { type: "object", properties: { sepal_length: { type: "number" } } },
+        output_schema: { type: "object", properties: { score: { type: "number" } } },
+        created_at: "2026-04-01T10:00:00Z",
+        labels: {},
+        source_type: "image",
+        image_ref: "gitea.mldlc.local/user/iris:latest",
+      });
+    }
+    if (request.method() === "GET" && path === "/deployments/iris-serving/dashboards") {
+      return json([
+        { id: "latency", title: "Latency", plot_type: "latency", source: "system", field_path: "latency_ms", is_system_locked: true, iframe_url: "http://grafana.local/d-solo/latency", created_at: "2026-04-01T10:00:00Z" },
+        { id: "status", title: "Status codes", plot_type: "status_code", source: "system", field_path: "status_code", is_system_locked: true, iframe_url: "http://grafana.local/d-solo/status", created_at: "2026-04-01T10:00:00Z" },
+      ]);
+    }
+    if (request.method() === "GET" && path === "/deployments/iris-serving/plot-fields") {
+      return json([{ source: "output", path: "score", value_type: "number" }]);
+    }
     if (request.method() === "GET" && path === "/users/me/api-keys") {
       return json(keys);
     }
@@ -143,6 +182,11 @@ test("dashboard smoke flow", async ({ page }) => {
   await page.getByText("Iris models").click();
   await page.getByText("Iris classifier").click();
   await expect(page.getByText("Download model artifact")).toBeVisible();
+  await sidebar.getByRole("link", { name: "Deployments", exact: true }).click();
+  await expect(page.getByText("Iris serving")).toBeVisible();
+  await page.getByText("Iris serving").click();
+  await expect(page.getByText("Observability")).toBeVisible();
+  await expect(page.getByTitle("Latency")).toBeVisible();
   await sidebar.getByRole("link", { name: "Account", exact: true }).click();
   await page.getByPlaceholder("sdk").fill("cli");
   await page.getByRole("button", { name: "Create API key" }).click();

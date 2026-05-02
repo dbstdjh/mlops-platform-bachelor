@@ -1,15 +1,25 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, StatusBadge } from "@/components/ui";
+import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, PaginationControls, SearchInput, SelectInput, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 import { groupDatasets } from "@/lib/datasets";
 
+const PAGE_SIZE = 24;
+
 export function DatasetsPage() {
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [offset, setOffset] = useState(0);
   const datasetsQuery = useQuery({
-    queryKey: ["datasets"],
-    queryFn: async () => groupDatasets(await api.listDatasets()),
+    queryKey: ["datasets", { search, sortBy, sortDir, offset }],
+    queryFn: async () => {
+      const page = await api.listDatasetsPage({ search, sort_by: sortBy, sort_dir: sortDir, limit: PAGE_SIZE, offset });
+      return { ...page, groups: groupDatasets(page.items) };
+    },
   });
 
   if (datasetsQuery.isLoading) {
@@ -29,14 +39,39 @@ export function DatasetsPage() {
       <PageHeader
         eyebrow="Feature Registry"
         title="Datasets"
-        description="Logical dataset groups are assembled on the client from version rows returned by the control plane."
+        description="Search and sort dataset version records returned by the control plane."
+        action={
+          <div className="grid w-full gap-3 md:max-w-2xl md:grid-cols-[minmax(0,1fr)_170px_175px]">
+            <SearchInput placeholder="Search by name, slug, status" value={search} onChange={(value) => { setSearch(value); setOffset(0); }} />
+            <SelectInput
+              onValueChange={(value) => { setSortBy(value); setOffset(0); }}
+              options={[
+                { value: "created_at", label: "Newest" },
+                { value: "name", label: "Name" },
+                { value: "version", label: "Version" },
+                { value: "status", label: "Status" },
+              ]}
+              value={sortBy}
+            />
+            <SelectInput
+              onValueChange={(value) => { setSortDir(value as "asc" | "desc"); setOffset(0); }}
+              options={[
+                { value: "desc", label: "Descending" },
+                { value: "asc", label: "Ascending" },
+              ]}
+              value={sortDir}
+            />
+          </div>
+        }
       />
 
-      {datasetsQuery.data.length === 0 ? (
+      {datasetsQuery.data.groups.length === 0 ? (
         <EmptyState title="No datasets yet" description="Uploads initiated through the SDK will appear here once recorded by the control plane." />
       ) : (
-        <div className="grid gap-4">
-          {datasetsQuery.data.map((group: (typeof datasetsQuery.data)[number]) => (
+        <div className="space-y-4">
+          <PaginationControls total={datasetsQuery.data.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+          <div className="grid gap-4">
+          {datasetsQuery.data.groups.map((group: (typeof datasetsQuery.data.groups)[number]) => (
             <div key={group.slug} className="rounded-[28px] border border-border bg-mist/80 p-6 shadow-card">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-3">
@@ -78,6 +113,8 @@ export function DatasetsPage() {
               </div>
             </div>
           ))}
+          </div>
+          <PaginationControls total={datasetsQuery.data.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
         </div>
       )}
     </div>

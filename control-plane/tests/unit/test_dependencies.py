@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.application.api_key_service import ApiKeyService
+from src.application.artifact_registry_service import ArtifactRegistryService
 from src.application.dataset_service import DatasetService
 from src.application.experiment_tracking_service import ExperimentTrackingService
 from src.application.model_registry_service import ModelRegistryService
@@ -133,6 +134,24 @@ async def test_get_api_key_service_wires_expected_dependencies():
 
     assert isinstance(service, ApiKeyService)
     assert service._api_key_repo._session is session
+
+
+@pytest.mark.asyncio
+async def test_get_artifact_registry_service_wires_expected_dependencies():
+    session = object()
+    gitea_client = object()
+    settings = Settings(gitea_public_url="http://gitea.mldlc.local")
+
+    service = await dependencies.get_artifact_registry_service(
+        session=session,
+        settings=settings,
+        gitea_client=gitea_client,
+    )
+
+    assert isinstance(service, ArtifactRegistryService)
+    assert service._gitea_client is gitea_client
+    assert service._feature_repo._session is session
+    assert service._deployment_repo._session is session
 
 
 @pytest.mark.asyncio

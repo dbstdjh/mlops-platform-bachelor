@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployment-service
+  namespace: mldlc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployment-service
+  namespace: mldlc
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "pods"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deployment-service
+  namespace: mldlc
+subjects:
+  - kind: ServiceAccount
+    name: deployment-service
+    namespace: mldlc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: deployment-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-service
+  namespace: mldlc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: deployment-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: deployment-service
+    spec:
+      serviceAccountName: deployment-service
+      containers:
+        - name: deployment-service
+          image: mldlc/deployment-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: platform-config
+            - secretRef:
+                name: platform-secret
+          env:
+            - name: NAMESPACE
+              value: mldlc
+            - name: MODEL_SERVICE_TYPE
+              value: ClusterIP
+            - name: PREBUILT_PICKLE_IMAGE
+              value: mldlc/sklearn-pickle-server:dev

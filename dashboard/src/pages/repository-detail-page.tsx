@@ -1,17 +1,27 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
-import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, Panel, SectionTitle, StatusBadge } from "@/components/ui";
+import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, PaginationControls, Panel, SearchInput, SectionTitle, SelectInput, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 
+const PAGE_SIZE = 12;
+
 export function RepositoryDetailPage() {
   const { slug = "" } = useParams();
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [offset, setOffset] = useState(0);
 
   const repositoryQuery = useQuery({
-    queryKey: ["repository", slug],
+    queryKey: ["repository", slug, { search, sortBy, sortDir, offset }],
     queryFn: async () => {
-      const [repository, models] = await Promise.all([api.getRepository(slug), api.listModels(slug)]);
+      const [repository, models] = await Promise.all([
+        api.getRepository(slug),
+        api.listModelsPage(slug, { search, sort_by: sortBy, sort_dir: sortDir, limit: PAGE_SIZE, offset }),
+      ]);
       return { repository, models };
     },
   });
@@ -49,7 +59,7 @@ export function RepositoryDetailPage() {
           </div>
           <div className="rounded-2xl border border-border bg-paper/75 p-4">
             <p className="font-mono text-xs uppercase tracking-[0.24em] text-stone-500">Models tracked</p>
-            <p className="mt-2 text-lg font-semibold">{models.length}</p>
+            <p className="mt-2 text-lg font-semibold">{models.total}</p>
           </div>
         </div>
         <div className="space-y-3">
@@ -60,11 +70,34 @@ export function RepositoryDetailPage() {
 
       <Panel className="space-y-5">
         <SectionTitle title="Model versions" description="Versions are loaded from the existing repository-scoped API." />
-        {models.length === 0 ? (
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_170px_175px]">
+          <SearchInput placeholder="Search model versions" value={search} onChange={(value) => { setSearch(value); setOffset(0); }} />
+          <SelectInput
+            onValueChange={(value) => { setSortBy(value); setOffset(0); }}
+            options={[
+              { value: "created_at", label: "Newest" },
+              { value: "version", label: "Version" },
+              { value: "name", label: "Name" },
+              { value: "status", label: "Status" },
+            ]}
+            value={sortBy}
+          />
+          <SelectInput
+            onValueChange={(value) => { setSortDir(value as "asc" | "desc"); setOffset(0); }}
+            options={[
+              { value: "desc", label: "Descending" },
+              { value: "asc", label: "Ascending" },
+            ]}
+            value={sortDir}
+          />
+        </div>
+        {models.items.length === 0 ? (
           <EmptyState title="No model versions yet" description="Once versions are created in this repository, they will show up here." />
         ) : (
-          <div className="space-y-3">
-            {models.map((model: (typeof models)[number]) => (
+          <div className="space-y-4">
+            <PaginationControls total={models.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+            <div className="space-y-3">
+            {models.items.map((model: (typeof models.items)[number]) => (
               <Link
                 key={model.version}
                 className="block rounded-[24px] border border-border bg-paper/70 p-5 transition hover:border-accent/40"
@@ -90,6 +123,8 @@ export function RepositoryDetailPage() {
                 </div>
               </Link>
             ))}
+            </div>
+            <PaginationControls total={models.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
           </div>
         )}
       </Panel>

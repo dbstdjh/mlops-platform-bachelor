@@ -1,22 +1,28 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
-import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, Panel, SectionTitle, StatusBadge } from "@/components/ui";
+import { EmptyState, ErrorState, LabelChips, LoadingCard, PageHeader, PaginationControls, Panel, SearchInput, SectionTitle, SelectInput, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 import { formatNumber } from "@/lib/utils";
 
 const MAX_VISIBLE_RUN_METRICS = 4;
+const PAGE_SIZE = 12;
 
 export function ExperimentDetailPage() {
   const { slug = "" } = useParams();
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("run_number");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [offset, setOffset] = useState(0);
 
   const summaryQuery = useQuery({
-    queryKey: ["experiment", slug],
+    queryKey: ["experiment", slug, { search, sortBy, sortDir, offset }],
     queryFn: async () => {
       const [experiment, runs] = await Promise.all([
         api.getExperiment(slug),
-        api.listRuns(slug),
+        api.listRunsPage(slug, { search, sort_by: sortBy, sort_dir: sortDir, limit: PAGE_SIZE, offset }),
       ]);
       return { experiment, runs };
     },
@@ -66,11 +72,33 @@ export function ExperimentDetailPage() {
 
       <Panel className="space-y-5">
         <SectionTitle title="Runs" description="Experiment observability lives at the run level. Open a run to inspect its saved Grafana plots." />
-        {runs.length === 0 ? (
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_170px_175px]">
+          <SearchInput placeholder="Search runs by number, status, dataset" value={search} onChange={(value) => { setSearch(value); setOffset(0); }} />
+          <SelectInput
+            onValueChange={(value) => { setSortBy(value); setOffset(0); }}
+            options={[
+              { value: "run_number", label: "Run number" },
+              { value: "created_at", label: "Created" },
+              { value: "status", label: "Status" },
+            ]}
+            value={sortBy}
+          />
+          <SelectInput
+            onValueChange={(value) => { setSortDir(value as "asc" | "desc"); setOffset(0); }}
+            options={[
+              { value: "desc", label: "Descending" },
+              { value: "asc", label: "Ascending" },
+            ]}
+            value={sortDir}
+          />
+        </div>
+        {runs.items.length === 0 ? (
           <EmptyState title="No runs yet" description="Start a run through the SDK and it will appear here with status and latest metrics." />
         ) : (
-          <div className="space-y-3">
-            {runs.map((run: (typeof runs)[number]) => {
+          <div className="space-y-4">
+            <PaginationControls total={runs.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
+            <div className="space-y-3">
+            {runs.items.map((run: (typeof runs.items)[number]) => {
               const latestMetrics = Object.entries(run.latest_metrics) as Array<[string, number]>;
               const visibleMetrics = latestMetrics.slice(0, MAX_VISIBLE_RUN_METRICS);
               const hiddenMetrics = latestMetrics.slice(MAX_VISIBLE_RUN_METRICS);
@@ -144,6 +172,8 @@ export function ExperimentDetailPage() {
                 </div>
               );
             })}
+            </div>
+            <PaginationControls total={runs.total} limit={PAGE_SIZE} offset={offset} onOffsetChange={setOffset} />
           </div>
         )}
       </Panel>

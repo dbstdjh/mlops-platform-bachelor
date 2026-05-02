@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from sqlalchemy.engine import make_url
 
-from src.core.entities.dashboard import PlotType
+from src.core.entities.dashboard import DeploymentPlotSource, DeploymentPlotType, PlotType
 from src.core.ports.observability import GrafanaDashboardClient
 
 
@@ -131,6 +131,48 @@ class HttpGrafanaDashboardClient(GrafanaDashboardClient):
             raise GrafanaProvisioningError(f"Grafana dashboard upsert failed: {response.text}")
         return uid
 
+    async def upsert_deployment_plot(
+        self,
+        *,
+        grafana_uid: str | None,
+        title: str,
+        deployment_id: uuid.UUID,
+        plot_type: DeploymentPlotType | str,
+        source: DeploymentPlotSource | str,
+        field_path: str | None = None,
+        field_type: str | None = None,
+    ) -> str:
+        datasource_uid = await self._ensure_postgres_datasource()
+        uid = grafana_uid or uuid.uuid4().hex[:12]
+        dashboard = {
+            "uid": uid,
+            "title": title,
+            "timezone": "browser",
+            "schemaVersion": 39,
+            "version": 0,
+            "editable": True,
+            "panels": [
+                self._build_deployment_panel(
+                    datasource_uid=datasource_uid,
+                    deployment_id=deployment_id,
+                    plot_type=plot_type,
+                    source=source,
+                    field_path=field_path,
+                    field_type=field_type,
+                    title=title,
+                )
+            ],
+            "time": {"from": "now-24h", "to": "now"},
+            "refresh": "30s",
+        }
+        payload = {"dashboard": dashboard, "overwrite": True}
+
+        async with self._client() as client:
+            response = await client.post("/api/dashboards/db", json=payload)
+        if response.status_code >= 400:
+            raise GrafanaProvisioningError(f"Grafana dashboard upsert failed: {response.text}")
+        return uid
+
     async def delete_dashboard(self, grafana_uid: str) -> None:
         async with self._client() as client:
             response = await client.delete(f"/api/dashboards/uid/{grafana_uid}")
@@ -194,6 +236,150 @@ class HttpGrafanaDashboardClient(GrafanaDashboardClient):
                 "overrides": [],
             },
         }
+
+    def _build_deployment_panel(
+        self,
+        *,
+        datasource_uid: str,
+        deployment_id: uuid.UUID,
+        plot_type: DeploymentPlotType | str,
+        source: DeploymentPlotSource | str,
+        field_path: str | None,
+        field_type: str | None,
+        title: str,
+    ) -> dict[str, Any]:
+        panel_type = "timeseries"
+        options: dict[str, Any] = {
+            "legend": {"displayMode": "list", "placement": "bottom", "showLegend": False},
+            "tooltip": {"mode": "single", "sort": "none"},
+        }
+        field_config: dict[str, Any] = {
+            "defaults": {
+                "color": {"mode": "palette-classic"},
+                "custom": {
+                    "axisPlacement": "auto",
+                    "drawStyle": "line",
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 4,
+                    "showPoints": "never",
+                    "spanNulls": True,
+                    "insertNulls": False,
+                    "scaleDistribution": {"type": "linear"},
+                },
+            },
+            "overrides": [],
+        }
+
+        if plot_type in {"status_code", "distribution"}:
+            panel_type = "barchart"
+            options = {
+                "legend": {"displayMode": "list", "placement": "bottom", "showLegend": False},
+                "tooltip": {"mode": "single", "sort": "none"},
+                "xField": "bucket",
+            }
+            field_config = {"defaults": {"color": {"mode": "palette-classic"}}, "overrides": []}
+        elif plot_type == "category_time_series":
+            options = {
+                "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
+                "tooltip": {"mode": "multi", "sort": "desc"},
+            }
+
+        return {
+            "id": 1,
+            "type": panel_type,
+            "title": title,
+            "datasource": {"type": "postgres", "uid": datasource_uid},
+            "gridPos": {"h": 12, "w": 24, "x": 0, "y": 0},
+            "targets": [
+                {
+                    "refId": "A",
+                    "format": "table",
+                    "rawSql": self._build_deployment_plot_sql(
+                        deployment_id=deployment_id,
+                        plot_type=plot_type,
+                        source=source,
+                        field_path=field_path,
+                        field_type=field_type,
+                    ),
+                    "editorMode": "code",
+                }
+            ],
+            "options": options,
+            "fieldConfig": field_config,
+        }
+
+    def _build_deployment_plot_sql(
+        self,
+        *,
+        deployment_id: uuid.UUID,
+        plot_type: DeploymentPlotType | str,
+        source: DeploymentPlotSource | str,
+        field_path: str | None,
+        field_type: str | None,
+    ) -> str:
+        quoted_deployment_id = self._sql_string_literal(str(deployment_id))
+        if plot_type == "latency":
+            return (
+                "SELECT timestamp AS time, latency_ms AS value "
+                "FROM inference_log "
+                f"WHERE deployment_id = {quoted_deployment_id} AND latency_ms IS NOT NULL AND $__timeFilter(timestamp) "
+                "ORDER BY timestamp ASC"
+            )
+        if plot_type == "status_code":
+            return (
+                "SELECT CAST(status_code AS text) AS bucket, COUNT(*) AS value "
+                "FROM inference_log "
+                f"WHERE deployment_id = {quoted_deployment_id} AND status_code IS NOT NULL AND $__timeFilter(timestamp) "
+                "GROUP BY status_code ORDER BY status_code ASC"
+            )
+
+        if source not in {"input", "output"} or not field_path:
+            raise ValueError("custom deployment plots require a source and field path")
+
+        json_column = "input_data" if source == "input" else "output_data"
+        normalized_field_path = self._normalize_legacy_array_path(field_path, field_type)
+        json_path_literal = self._jsonpath_literal(normalized_field_path)
+        numeric_pattern = self._sql_string_literal(r"^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$")
+        raw_value_expr = "values.value #>> '{}'"
+        samples_from = (
+            "FROM inference_log "
+            f"CROSS JOIN LATERAL jsonb_path_query({json_column}, {json_path_literal}) AS values(value) "
+        )
+
+        if plot_type == "category_time_series":
+            return (
+                f"WITH samples AS (SELECT timestamp, {raw_value_expr} AS raw_value "
+                f"{samples_from}"
+                f"WHERE deployment_id = {quoted_deployment_id} AND $__timeFilter(timestamp)) "
+                "SELECT $__timeGroup(timestamp, '1m') AS time, raw_value AS metric, COUNT(*) AS value "
+                "FROM samples WHERE raw_value IS NOT NULL "
+                "GROUP BY 1, 2 ORDER BY 1 ASC"
+            )
+
+        if plot_type == "distribution":
+            value_filter = ""
+            order_by = "value DESC, bucket ASC"
+            if field_type in {"number", "number_array", "number_matrix", "number_matrix_index", None}:
+                value_filter = f"AND raw_value ~ {numeric_pattern} "
+                order_by = "CAST(raw_value AS double precision) ASC"
+            return (
+                f"WITH samples AS (SELECT {raw_value_expr} AS raw_value "
+                f"{samples_from}"
+                f"WHERE deployment_id = {quoted_deployment_id} AND $__timeFilter(timestamp)) "
+                "SELECT raw_value AS bucket, COUNT(*) AS value FROM samples "
+                f"WHERE raw_value IS NOT NULL {value_filter}"
+                f"GROUP BY raw_value ORDER BY {order_by}"
+            )
+
+        return (
+            f"WITH samples AS (SELECT timestamp, {raw_value_expr} AS raw_value "
+            f"{samples_from}"
+            f"WHERE deployment_id = {quoted_deployment_id} AND $__timeFilter(timestamp)) "
+            "SELECT timestamp AS time, CAST(raw_value AS double precision) AS value FROM samples "
+            f"WHERE raw_value ~ {numeric_pattern} "
+            "ORDER BY timestamp ASC"
+        )
 
     def _build_targets(self, *, run_id: uuid.UUID, plot_type: PlotType, metrics: list[str]) -> list[dict[str, Any]]:
         if plot_type == "line":
@@ -281,6 +467,50 @@ class HttpGrafanaDashboardClient(GrafanaDashboardClient):
     def _sql_string_literal(self, value: str) -> str:
         escaped = value.replace("'", "''")
         return f"'{escaped}'"
+
+    def _sql_path_literal(self, field_path: str) -> str:
+        parts = [part for part in field_path.split(".") if part]
+        escaped = ",".join(part.replace('"', '\\"').replace("\\", "\\\\") for part in parts)
+        return f"'{{{escaped}}}'"
+
+    def _normalize_legacy_array_path(self, field_path: str, field_type: str | None) -> str:
+        if "[" in field_path:
+            return field_path
+        if field_type == "number_array":
+            return f"{field_path}[*]"
+        return field_path
+
+    def _jsonpath_literal(self, field_path: str) -> str:
+        path = "$"
+        for segment in [part for part in field_path.split(".") if part]:
+            name = ""
+            index = 0
+            while index < len(segment) and segment[index] != "[":
+                name += segment[index]
+                index += 1
+            if name:
+                path += self._jsonpath_property(name)
+            while index < len(segment):
+                if not segment.startswith("[", index):
+                    raise ValueError(f"Invalid deployment plot field path: {field_path}")
+                end = segment.find("]", index)
+                if end == -1:
+                    raise ValueError(f"Invalid deployment plot field path: {field_path}")
+                selector = segment[index + 1:end]
+                if selector == "*":
+                    path += "[*]"
+                elif selector.isdigit():
+                    path += f"[{selector}]"
+                else:
+                    raise ValueError(f"Invalid deployment plot field path: {field_path}")
+                index = end + 1
+        return f"{self._sql_string_literal(path)}::jsonpath"
+
+    def _jsonpath_property(self, name: str) -> str:
+        if name.replace("_", "a").isalnum() and (name[0].isalpha() or name[0] == "_"):
+            return f".{name}"
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        return f'."{escaped}"'
 
     async def _ensure_postgres_datasource(self) -> str:
         async with self._client() as client:

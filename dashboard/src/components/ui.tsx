@@ -1,4 +1,7 @@
 import { Link } from "react-router-dom";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown } from "lucide-react";
 
 import { clsx } from "@/lib/utils";
 
@@ -110,11 +113,11 @@ export function StatusBadge({ status }: { status: string }) {
     .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
     .join(" ");
   const tone =
-    status === "READY" || status === "COMPLETED"
+    status === "READY" || status === "COMPLETED" || status === "ACTIVE"
       ? "bg-success/10 text-success border-success/20"
-      : status === "RUNNING"
+      : status === "RUNNING" || status === "DEPLOYING"
         ? "bg-accent/10 text-accent border-accent/20"
-        : status === "FAILED"
+        : status === "FAILED" || status === "DELETED"
           ? "bg-danger/10 text-danger border-danger/20"
           : "bg-warning/10 text-warning border-warning/20";
 
@@ -212,6 +215,180 @@ export function SearchInput({
       className="w-full rounded-full border border-border bg-paper px-4 py-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       placeholder={placeholder}
     />
+  );
+}
+
+export interface SelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export function SelectInput({
+  ariaLabel,
+  className,
+  disabled,
+  onValueChange,
+  options,
+  placeholder = "Select",
+  value,
+}: {
+  ariaLabel?: string;
+  className?: string;
+  disabled?: boolean;
+  onValueChange: (value: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  value: string;
+}) {
+  const id = useId();
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties | null>(null);
+  const selectedOption = useMemo(() => options.find((option) => option.value === value), [options, value]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function updatePosition() {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      const availableBelow = window.innerHeight - rect.bottom - 16;
+      setPopoverStyle({
+        left: rect.left,
+        maxHeight: Math.max(160, Math.min(256, availableBelow)),
+        top: rect.bottom + 8,
+        width: rect.width,
+      });
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <span className={clsx("relative block w-full", open ? "z-[90]" : "z-0", className)} ref={rootRef}>
+      <button
+        aria-controls={open ? id : undefined}
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-full border border-border bg-paper px-4 text-left text-sm text-ink shadow-sm outline-none transition hover:border-accent/45 hover:bg-white focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        ref={buttonRef}
+        type="button"
+      >
+        <span className={clsx("min-w-0 truncate", selectedOption ? "text-ink" : "text-stone-500")}>
+          {selectedOption?.label ?? placeholder}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={clsx("h-4 w-4 shrink-0 text-stone-500 transition", open ? "rotate-180" : "")}
+        />
+      </button>
+      {open && popoverStyle ? createPortal(
+        <div
+          className="fixed z-[9999] overflow-auto rounded-2xl border border-border bg-white p-1.5 shadow-2xl ring-1 ring-black/5"
+          id={id}
+          ref={popoverRef}
+          role="listbox"
+          style={popoverStyle}
+        >
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <button
+                aria-selected={selected}
+                className={clsx(
+                  "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
+                  selected ? "bg-accent/10 text-ink" : "text-stone-700 hover:bg-mist",
+                  option.disabled ? "cursor-not-allowed opacity-45" : "",
+                )}
+                disabled={option.disabled}
+                key={option.value}
+                onClick={() => {
+                  onValueChange(option.value);
+                  setOpen(false);
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="min-w-0 whitespace-normal break-words">{option.label}</span>
+                {selected ? <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-accent" /> : null}
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      ) : null}
+    </span>
+  );
+}
+
+export function PaginationControls({
+  total,
+  limit,
+  offset,
+  onOffsetChange,
+}: {
+  total: number;
+  limit: number;
+  offset: number;
+  onOffsetChange: (offset: number) => void;
+}) {
+  const start = total === 0 ? 0 : offset + 1;
+  const end = Math.min(offset + limit, total);
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-paper/70 px-4 py-3 text-sm text-stone-600 sm:flex-row sm:items-center sm:justify-between">
+      <span>
+        Showing {start}-{end} of {total}
+      </span>
+      <div className="flex gap-2">
+        <SecondaryButton disabled={offset === 0} onClick={() => onOffsetChange(Math.max(0, offset - limit))} type="button">
+          Previous
+        </SecondaryButton>
+        <SecondaryButton disabled={offset + limit >= total} onClick={() => onOffsetChange(offset + limit)} type="button">
+          Next
+        </SecondaryButton>
+      </div>
+    </div>
   );
 }
 

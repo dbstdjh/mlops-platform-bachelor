@@ -1,4 +1,4 @@
-import { BarChart3, Database, FolderKanban, KeyRound, LayoutDashboard, LogOut, Microscope } from "lucide-react";
+import { BarChart3, Database, FolderKanban, KeyRound, LayoutDashboard, LogOut, Microscope, Rocket } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "@/hooks/use-auth";
@@ -9,6 +9,7 @@ const navigation = [
   { to: "/experiments", label: "Experiments", icon: Microscope },
   { to: "/datasets", label: "Datasets", icon: Database },
   { to: "/repositories", label: "Repositories", icon: FolderKanban },
+  { to: "/deployments", label: "Deployments", icon: Rocket },
   { to: "/account", label: "Account", icon: KeyRound },
 ];
 

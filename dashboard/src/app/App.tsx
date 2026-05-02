@@ -7,6 +7,8 @@ import { ProtectedLayout, PublicOnlyRoute } from "@/components/routes";
 import { AccountPage } from "@/pages/account-page";
 import { DatasetDetailPage } from "@/pages/dataset-detail-page";
 import { DatasetsPage } from "@/pages/datasets-page";
+import { DeploymentDetailPage } from "@/pages/deployment-detail-page";
+import { DeploymentsPage } from "@/pages/deployments-page";
 import { ExperimentDetailPage } from "@/pages/experiment-detail-page";
 import { ExperimentsPage } from "@/pages/experiments-page";
 import { LoginPage } from "@/pages/login-page";
@@ -52,6 +54,8 @@ export function App() {
               <Route path="/repositories" element={<RepositoriesPage />} />
               <Route path="/repositories/:slug" element={<RepositoryDetailPage />} />
               <Route path="/repositories/:slug/models/:version" element={<ModelDetailPage />} />
+              <Route path="/deployments" element={<DeploymentsPage />} />
+              <Route path="/deployments/:slug" element={<DeploymentDetailPage />} />
               <Route path="/account" element={<AccountPage />} />
             </Route>
 

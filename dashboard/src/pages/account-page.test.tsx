@@ -21,6 +21,19 @@ describe("account page", () => {
       { method: "GET", path: "/users/me", handler: () => ok({ email: "user@example.com", is_active: true, is_superuser: false, is_verified: true, created_at: "2026-04-01T10:00:00Z" }) },
       { method: "GET", path: "/users/me/api-keys", handler: () => ok(keys) },
       {
+        method: "GET",
+        path: "/artifact-registry/status",
+        handler: () => ok({
+          enabled: true,
+          registry_host: "gitea.mldlc.local",
+          username: "mldlc-user",
+          namespace: "gitea.mldlc.local/mldlc-user",
+          docker_login_command: "docker login gitea.mldlc.local -u mldlc-user --password-stdin",
+        }),
+      },
+      { method: "GET", path: "/artifact-registry/tokens", handler: () => ok([]) },
+      { method: "GET", path: "/artifact-registry/images", handler: () => ok([{ name: "fraud", tags: [{ tag: "latest", image_ref: "gitea.mldlc.local/mldlc-user/fraud:latest", created_at: null }] }]) },
+      {
         method: "POST",
         path: "/users/me/api-keys",
         handler: async () => {

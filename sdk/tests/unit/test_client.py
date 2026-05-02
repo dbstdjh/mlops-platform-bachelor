@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 import httpx
 import pandas as pd
 import pytest
+from pydantic import BaseModel
 
 from mldlc import (
     AuthenticationError,
     ConflictError,
     DatasetReadyTimeoutError,
+    DeploymentInfo,
     MLDLC,
     ModelVersion,
     NotFoundError,
@@ -72,6 +74,21 @@ def model_payload(status: str = "READY") -> dict:
     }
 
 
+def deployment_payload(status: str = "PENDING") -> dict:
+    return {
+        "name": "fraud-prod",
+        "slug": "fraud-prod",
+        "status": status,
+        "endpoint_url": None,
+        "input_schema": {"type": "object"},
+        "output_schema": {"type": "object"},
+        "created_at": "2026-01-01T00:00:00Z",
+        "labels": {"env": "prod"},
+        "source_type": "file",
+        "image_ref": None,
+    }
+
+
 def test_authentication_is_lazy_and_cached():
     calls = {"login": 0, "datasets": 0}
 
@@ -93,6 +110,25 @@ def test_authentication_is_lazy_and_cached():
         client.close()
 
     assert calls == {"login": 1, "datasets": 2}
+
+
+def test_access_token_returns_cached_bearer_token_for_gateway_calls():
+    calls = {"login": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users:login_with_api_key"):
+            calls["login"] += 1
+            return json_response({"access_token": "jwt-token"})
+        return httpx.Response(404)
+
+    client = build_client(handler)
+    try:
+        assert client.access_token() == "jwt-token"
+        assert client.access_token() == "jwt-token"
+    finally:
+        client.close()
+
+    assert calls == {"login": 1}
 
 
 def test_request_refreshes_jwt_once_after_401():
@@ -230,3 +266,103 @@ def test_log_model_completes_full_model_lifecycle():
     assert result.file_type == "pickle"
     assert uploaded["bytes"]
     assert calls == {"create": 1, "upload": 1, "confirm": 1, "get": 1}
+
+
+def test_deploy_model_converts_pydantic_schemas_and_uses_nested_route():
+    class FraudInput(BaseModel):
+        amount: float
+
+    class FraudOutput(BaseModel):
+        predictions: list[int]
+
+    calls = {"deploy": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users:login_with_api_key"):
+            return json_response({"access_token": "jwt-token"})
+        if request.url.path.endswith("/repositories/fraud/models/1.0/deployments"):
+            calls["deploy"] += 1
+            body = request.read().decode()
+            assert '"name":"fraud-prod"' in body
+            assert '"amount"' in body
+            assert '"predictions"' in body
+            return json_response(deployment_payload(), status_code=201)
+        return httpx.Response(404)
+
+    client = build_client(handler)
+    try:
+        result = client.deploy_model(
+            "fraud",
+            "1.0",
+            "fraud-prod",
+            input_schema=FraudInput,
+            output_schema=FraudOutput,
+            labels={"env": "prod"},
+        )
+    finally:
+        client.close()
+
+    assert isinstance(result, DeploymentInfo)
+    assert result.slug == "fraud-prod"
+    assert calls == {"deploy": 1}
+
+
+def test_artifact_registry_methods_use_expected_routes():
+    calls = {"enable": 0, "token": 0, "images": 0, "deploy": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users:login_with_api_key"):
+            return json_response({"access_token": "jwt-token"})
+        if request.url.path.endswith("/artifact-registry:enable"):
+            calls["enable"] += 1
+            return json_response(
+                {
+                    "enabled": True,
+                    "registry_host": "gitea.mldlc.local",
+                    "username": "mldlc-user",
+                    "namespace": "gitea.mldlc.local/mldlc-user",
+                    "docker_login_command": "docker login gitea.mldlc.local -u mldlc-user --password-stdin",
+                }
+            )
+        if request.url.path.endswith("/artifact-registry/tokens"):
+            calls["token"] += 1
+            return json_response(
+                {
+                    "name": "workstation",
+                    "token_last_eight": "aintext",
+                    "created_at": None,
+                    "token": "workstation-plaintext",
+                    "registry_host": "gitea.mldlc.local",
+                    "username": "mldlc-user",
+                    "docker_login_command": "docker login gitea.mldlc.local -u mldlc-user --password-stdin",
+                },
+                status_code=201,
+            )
+        if request.url.path.endswith("/artifact-registry/images") and request.method == "GET":
+            calls["images"] += 1
+            return json_response(
+                [{"name": "fraud", "tags": [{"tag": "latest", "image_ref": "gitea.mldlc.local/mldlc-user/fraud:latest"}]}]
+            )
+        if request.url.path.endswith("/artifact-registry/images/fraud/tags/latest/deployments"):
+            calls["deploy"] += 1
+            return json_response(
+                deployment_payload()
+                | {
+                    "source_type": "image",
+                    "image_ref": "gitea.mldlc.local/mldlc-user/fraud:latest",
+                },
+                status_code=201,
+            )
+        return httpx.Response(404)
+
+    client = build_client(handler)
+    try:
+        assert client.enable_custom_deployments().enabled is True
+        assert client.create_registry_token("workstation").token == "workstation-plaintext"
+        assert client.list_custom_images()[0].tags[0].tag == "latest"
+        deployment = client.deploy_image("fraud", "latest", "fraud-prod")
+    finally:
+        client.close()
+
+    assert deployment.source_type == "image"
+    assert calls == {"enable": 1, "token": 1, "images": 1, "deploy": 1}

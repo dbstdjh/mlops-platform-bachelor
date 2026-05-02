@@ -5,10 +5,14 @@ resources:
   - configmap.yaml
   - postgres.yaml
   - db-init-job.yaml
+  - gitea-db-init-job.yaml
   - minio.yaml
   - minio-init-job.yaml
   - gitea.yaml
   - grafana.yaml
   - api.yaml
+  - edge-gateway.yaml
+  - deployment-service.yaml
   - dashboard.yaml
   - ingress.yaml
+  - postgres-ingress.yaml

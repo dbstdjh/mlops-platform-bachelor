@@ -17,6 +17,7 @@ from src.core.entities.experiment_tracking import (
 from src.core.entities.model_repository import ModelRepository, ModelRepositoryCreate
 from src.core.entities.model import Model, ModelCreate
 from src.core.entities.dataset import Dataset, DatasetCreate
+from src.core.entities.deployment import Deployment, DeploymentCreate
 
 
 class TestResourceEntity:
@@ -97,6 +98,25 @@ class TestDatasetEntity:
         data = DatasetCreate(name="iris", file_type="csv")
         assert data.name == "iris"
         assert data.file_type == "csv"
+        assert data.labels == {}
+
+
+class TestDeploymentEntity:
+    def test_deployment_defaults(self):
+        deployment = Deployment(
+            user_id=uuid.uuid4(),
+            resource_id=uuid.uuid4(),
+            name="fraud-prod",
+            slug="fraud-prod",
+        )
+        assert deployment.status == "PENDING"
+        assert deployment.endpoint_url is None
+        assert deployment.k8s_service_port is None
+
+    def test_deployment_create_schema(self):
+        data = DeploymentCreate(name="fraud-prod", input_schema={"type": "object"})
+        assert data.name == "fraud-prod"
+        assert data.input_schema == {"type": "object"}
         assert data.labels == {}
 
 
