@@ -17,3 +17,4 @@ dashboard/playwright.config.js
 dashboard/playwright.config.d.ts
 dashboard/tailwind.config.js
 dashboard/tailwind.config.d.ts
+report.md

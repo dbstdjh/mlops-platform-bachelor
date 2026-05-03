@@ -365,23 +365,39 @@ CREATE TABLE "inference_log" (
 
 -- ===================== Seed Data =============================
 
+INSERT INTO "run_status" ("id", "name") VALUES
+  (gen_random_uuid(), 'RUNNING'),
+  (gen_random_uuid(), 'COMPLETED'),
+  (gen_random_uuid(), 'FAILED')
+ON CONFLICT ("name") DO NOTHING;
+
+INSERT INTO "dataset_status" ("id", "name") VALUES
+  (gen_random_uuid(), 'PENDING'),
+  (gen_random_uuid(), 'READY')
+ON CONFLICT ("name") DO NOTHING;
+
+INSERT INTO "model_status" ("id", "name") VALUES
+  (gen_random_uuid(), 'PENDING'),
+  (gen_random_uuid(), 'READY')
+ON CONFLICT ("name") DO NOTHING;
+
 INSERT INTO "file_type" ("id", "name") VALUES
-  ('11111111-1111-1111-1111-111111111111', 'pickle'),
-  ('22222222-2222-2222-2222-222222222222', 'undefined')
+  (gen_random_uuid(), 'pickle'),
+  (gen_random_uuid(), 'undefined')
 ON CONFLICT ("name") DO NOTHING;
 
 INSERT INTO "deployment_status" ("id", "name") VALUES
-  ('33333333-3333-3333-3333-333333333331', 'PENDING'),
-  ('33333333-3333-3333-3333-333333333332', 'DEPLOYING'),
-  ('33333333-3333-3333-3333-333333333333', 'ACTIVE'),
-  ('33333333-3333-3333-3333-333333333334', 'FAILED'),
-  ('33333333-3333-3333-3333-333333333335', 'DELETING'),
-  ('33333333-3333-3333-3333-333333333336', 'DELETED')
+  (gen_random_uuid(), 'PENDING'),
+  (gen_random_uuid(), 'DEPLOYING'),
+  (gen_random_uuid(), 'ACTIVE'),
+  (gen_random_uuid(), 'FAILED'),
+  (gen_random_uuid(), 'DELETING'),
+  (gen_random_uuid(), 'DELETED')
 ON CONFLICT ("name") DO NOTHING;
 
 INSERT INTO "feature" ("id", "name", "description", "is_globally_enabled") VALUES
   (
-    '44444444-4444-4444-4444-444444444441',
+    gen_random_uuid(),
     'custom_deployments',
     'Allows users to manage custom Docker images in the Gitea artifact registry and deploy image tags.',
     TRUE
